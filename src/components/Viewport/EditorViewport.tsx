@@ -117,9 +117,27 @@ function disposeLightHelper(helper: THREE.Object3D) {
   disposable.dispose?.();
 }
 
+/** 平行光/聚光灯：Gizmo 挂在 target（与 Helper 重合，可拖拽照射目标） */
+function getLightTransformAttachObject(light: THREE.Light): THREE.Object3D {
+  if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
+    return light.target;
+  }
+  return light;
+}
+
+function applyLightTargetFromConfig(light: THREE.Light, target?: [number, number, number]) {
+  if (
+    target &&
+    (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight)
+  ) {
+    light.target.position.set(...target);
+  }
+}
+
 function addLightTargetToScene(scene: THREE.Scene, light: THREE.Light) {
   if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
     light.target.userData.isLightTarget = true;
+    light.target.userData.lightId = light.userData.id;
     if (light.target.parent !== scene) {
       scene.add(light.target);
     }
@@ -129,6 +147,7 @@ function addLightTargetToScene(scene: THREE.Scene, light: THREE.Light) {
 function removeLightTargetFromScene(scene: THREE.Scene, light: THREE.Light) {
   if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
     delete light.target.userData.isLightTarget;
+    delete light.target.userData.lightId;
     scene.remove(light.target);
   }
 }
@@ -150,6 +169,7 @@ export function EditorViewport() {
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const pointerDownRef = useRef({ x: 0, y: 0 });
   const gizmoWasDraggingRef = useRef(false);
+  const isLightTransformDraggingRef = useRef(false);
 
   const { camera, backgroundColor, objects, selectedIds, selectObject, deselectAll, updateObject, registerThreeObject, addObject } = useSceneStore();
   const { gridVisible, axesVisible, currentTool } = useEditorStore();
@@ -511,6 +531,19 @@ export function EditorViewport() {
     transformControls.addEventListener('dragging-changed', (event: any) => {
       // 拖拽Gizmo时完全禁用OrbitControls,实现互斥
       controls.enabled = !event.value;
+
+      const attached = transformControls.object;
+      if (attached) {
+        const { selectedLightId: activeLightId } = useLightStore.getState();
+        const activeLight = activeLightId ? lightsRef.current.get(activeLightId) : null;
+        if (
+          activeLight &&
+          (attached === activeLight ||
+            attached === getLightTransformAttachObject(activeLight))
+        ) {
+          isLightTransformDraggingRef.current = event.value;
+        }
+      }
       
       // 拖拽开始时记录初始状态
       if (event.value && transformControls.object) {
@@ -727,7 +760,8 @@ export function EditorViewport() {
           if (light && isTransformableLight(light)) {
             useSceneStore.getState().deselectAll();
             useLightStore.getState().selectLight(lightId);
-            transformControls.attach(light);
+            transformControls.attach(getLightTransformAttachObject(light));
+            transformControls.setMode('translate');
             return;
           }
         }
@@ -1124,6 +1158,12 @@ export function EditorViewport() {
   useEffect(() => {
     if (!transformControlsRef.current) return;
 
+    const { selectedLightId: activeLightId } = useLightStore.getState();
+    if (activeLightId && selectedIds.length === 0) {
+      transformControlsRef.current.setMode('translate');
+      return;
+    }
+
     const modeMap: Record<string, 'translate' | 'rotate' | 'scale'> = {
       select: 'translate',
       move: 'translate',
@@ -1132,7 +1172,7 @@ export function EditorViewport() {
     };
 
     transformControlsRef.current.setMode(modeMap[currentTool]);
-  }, [currentTool]);
+  }, [currentTool, selectedIds]);
 
   // 监听TransformControls变化,更新属性面板
   useEffect(() => {
@@ -1146,10 +1186,23 @@ export function EditorViewport() {
       const { selectedIds: currentSelectedIds, updateObject: syncObject } = useSceneStore.getState();
       const { selectedLightId: currentLightId, updateLight: syncLight } = useLightStore.getState();
 
-      if (currentLightId && currentSelectedIds.length === 0 && object instanceof THREE.Light) {
-        syncLight(currentLightId, {
-          position: [object.position.x, object.position.y, object.position.z],
-        });
+      if (currentLightId && currentSelectedIds.length === 0) {
+        const light = lightsRef.current.get(currentLightId);
+        if (!light) return;
+
+        if (
+          (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) &&
+          object === light.target
+        ) {
+          syncLight(currentLightId, {
+            target: [object.position.x, object.position.y, object.position.z],
+          });
+        } else {
+          syncLight(currentLightId, {
+            position: [object.position.x, object.position.y, object.position.z],
+          });
+        }
+
         const helper = lightHelpersRef.current.get(currentLightId);
         if (helper?.update) helper.update();
         return;
@@ -1179,7 +1232,8 @@ export function EditorViewport() {
     if (selectedLightId && selectedIds.length === 0) {
       const light = lightsRef.current.get(selectedLightId);
       if (light && isTransformableLight(light)) {
-        transformControls.attach(light);
+        transformControls.attach(getLightTransformAttachObject(light));
+        transformControls.setMode('translate');
       } else {
         transformControls.detach();
       }
@@ -1222,6 +1276,7 @@ export function EditorViewport() {
               dirLight.position.set(...lightConfig.position);
             }
             applyDirectionalShadowSettings(dirLight, lightConfig);
+            applyLightTargetFromConfig(dirLight, lightConfig.target);
             light = dirLight;
             break;
           }
@@ -1254,6 +1309,7 @@ export function EditorViewport() {
             if (lightConfig.castShadow) {
               (light as THREE.SpotLight).castShadow = true;
             }
+            applyLightTargetFromConfig(light as THREE.SpotLight, lightConfig.target);
             break;
 
           case 'hemisphere':
@@ -1293,8 +1349,11 @@ export function EditorViewport() {
           applyDirectionalShadowSettings(light, lightConfig);
         }
 
-        if (lightConfig.position && !(light instanceof THREE.AmbientLight)) {
-          light.position.set(...lightConfig.position);
+        if (!isLightTransformDraggingRef.current) {
+          if (lightConfig.position && !(light instanceof THREE.AmbientLight)) {
+            light.position.set(...lightConfig.position);
+          }
+          applyLightTargetFromConfig(light, lightConfig.target);
         }
 
         addLightTargetToScene(sceneRef.current!, light);

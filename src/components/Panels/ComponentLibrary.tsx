@@ -24,6 +24,7 @@ export function ComponentLibrary() {
         color: '#ffffff',
         intensity: 1.0,
         position: [5, 10, 7.5],
+        target: [0, 0, 0],
         castShadow: true,
       },
       point: {
@@ -41,6 +42,7 @@ export function ComponentLibrary() {
         color: '#ffffff',
         intensity: 1.0,
         position: [0, 5, 0],
+        target: [0, 0, 0],
         castShadow: true,
         distance: 10,
         angle: 0.5,

@@ -11,6 +11,11 @@ export function PropertyPanel() {
   const [activeTab, setActiveTab] = useState<'details' | 'material'>('details');
   const objectRef = useRef<THREE.Object3D | null>(null);
   const [currentMaterial, setCurrentMaterial] = useState<THREE.Material | null>(null);
+  const isLightInputEditingRef = useRef(false);
+  const [lightLiveTransform, setLightLiveTransform] = useState<{
+    position: [number, number, number];
+    target: [number, number, number];
+  } | null>(null);
 
   // 获取选中的第一个对象
   const selectedObject = selectedIds.length > 0 
@@ -88,6 +93,69 @@ export function PropertyPanel() {
     }
   }, [selectedIds, getThreeObject]);
 
+  // 实时同步灯光坐标（Gizmo 拖拽时更新右侧面板）
+  useEffect(() => {
+    if (!selectedLightId || selectedIds.length > 0) {
+      setLightLiveTransform(null);
+      return;
+    }
+
+    let rafId = 0;
+    const round2 = (n: number) => parseFloat(n.toFixed(2));
+
+    const syncFromScene = () => {
+      if (!isLightInputEditingRef.current) {
+        const scene = (window as any).__editorScene as THREE.Scene | undefined;
+        const threeLight = scene?.children.find(
+          (child): child is THREE.Light =>
+            child instanceof THREE.Light && child.userData?.id === selectedLightId
+        );
+
+        if (threeLight) {
+          const next = {
+            position: [
+              round2(threeLight.position.x),
+              round2(threeLight.position.y),
+              round2(threeLight.position.z),
+            ] as [number, number, number],
+            target: [0, 0, 0] as [number, number, number],
+          };
+
+          if (
+            threeLight instanceof THREE.DirectionalLight ||
+            threeLight instanceof THREE.SpotLight
+          ) {
+            next.target = [
+              round2(threeLight.target.position.x),
+              round2(threeLight.target.position.y),
+              round2(threeLight.target.position.z),
+            ];
+          }
+
+          setLightLiveTransform((prev) => {
+            if (
+              prev &&
+              prev.position[0] === next.position[0] &&
+              prev.position[1] === next.position[1] &&
+              prev.position[2] === next.position[2] &&
+              prev.target[0] === next.target[0] &&
+              prev.target[1] === next.target[1] &&
+              prev.target[2] === next.target[2]
+            ) {
+              return prev;
+            }
+            return next;
+          });
+        }
+      }
+
+      rafId = requestAnimationFrame(syncFromScene);
+    };
+
+    rafId = requestAnimationFrame(syncFromScene);
+    return () => cancelAnimationFrame(rafId);
+  }, [selectedLightId, selectedIds]);
+
   // 处理灯光属性变化 - 直接同步到Three.js场景
   const handleLightUpdate = (id: string, updates: Partial<any>) => {
     // 更新store
@@ -111,6 +179,12 @@ export function PropertyPanel() {
       if (updates.enabled !== undefined) threeLight.visible = updates.enabled;
       if (updates.position && threeLight.position) {
         threeLight.position.set(...updates.position);
+      }
+      if (
+        updates.target &&
+        (threeLight instanceof THREE.DirectionalLight || threeLight instanceof THREE.SpotLight)
+      ) {
+        threeLight.target.position.set(updates.target[0], updates.target[1], updates.target[2]);
       }
       
       // 阴影开关 (DirectionalLight和SpotLight)
@@ -223,6 +297,11 @@ export function PropertyPanel() {
 
   // 选中灯光 - 显示灯光调试面板
   if (selectedLight && selectedIds.length === 0) {
+    const displayPosition =
+      lightLiveTransform?.position ?? selectedLight.position ?? [0, 0, 0];
+    const displayTarget =
+      lightLiveTransform?.target ?? selectedLight.target ?? [0, 0, 0];
+
     return (
       <div className="h-full flex flex-col bg-gray-900">
         <div className="p-4 border-b border-gray-700">
@@ -270,9 +349,11 @@ export function PropertyPanel() {
           </div>
 
           {/* 位置 */}
-          {selectedLight.position && (
+          {(selectedLight.position || lightLiveTransform) && (
             <div>
-              <label className="text-xs text-gray-400 block mb-1">位置 (Position)</label>
+              <label className="text-xs text-gray-400 block mb-1">
+                {selectedLight.type === 'directional' ? '光源位置 (Sun Position)' : '位置 (Position)'}
+              </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['x', 'y', 'z'] as const).map((axis, idx) => (
                   <div key={axis}>
@@ -283,11 +364,13 @@ export function PropertyPanel() {
                     </label>
                     <input
                       type="number"
-                      step="1"
+                      step="0.1"
                       className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
-                      value={selectedLight.position![idx]}
+                      value={displayPosition[idx]}
+                      onFocus={() => { isLightInputEditingRef.current = true; }}
+                      onBlur={() => { isLightInputEditingRef.current = false; }}
                       onChange={(e) => {
-                        const newPos = [...selectedLight.position!] as [number, number, number];
+                        const newPos = [...displayPosition] as [number, number, number];
                         newPos[idx] = parseFloat(e.target.value);
                         handleLightUpdate(selectedLight.id, { position: newPos });
                       }}
@@ -295,6 +378,40 @@ export function PropertyPanel() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* 照射目标（平行光 / 聚光灯，Gizmo 拖拽此项） */}
+          {(selectedLight.type === 'directional' || selectedLight.type === 'spot') && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">照射目标 (Target)</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['x', 'y', 'z'] as const).map((axis, idx) => (
+                  <div key={axis}>
+                    <label className={`text-xs block mb-1 ${
+                      idx === 0 ? 'text-red-400' : idx === 1 ? 'text-green-400' : 'text-blue-400'
+                    }`}>
+                      {axis.toUpperCase()}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+                      value={displayTarget[idx]}
+                      onFocus={() => { isLightInputEditingRef.current = true; }}
+                      onBlur={() => { isLightInputEditingRef.current = false; }}
+                      onChange={(e) => {
+                        const newTarget = [...displayTarget] as [number, number, number];
+                        newTarget[idx] = parseFloat(e.target.value);
+                        handleLightUpdate(selectedLight.id, { target: newTarget });
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-500 mt-1">
+                视口 Gizmo 拖拽此项；光源位置请在上方调整太阳距离
+              </p>
             </div>
           )}
 

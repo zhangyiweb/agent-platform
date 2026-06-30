@@ -19,6 +19,7 @@ export const DEFAULT_LIGHTS: LightConfig[] = [
     color: '#fff3df',
     intensity: 3.0,
     position: [120, 200, 80],
+    target: [0, 0, 0],
     castShadow: true,
     shadowMapSize: 2048,
     shadowCameraNear: 1,
