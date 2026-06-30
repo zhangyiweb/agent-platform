@@ -24,6 +24,8 @@ import { useEditorStore } from '@/store/editorStore';
 import { useModelLoader } from '@/hooks/useModelLoader';
 import { useLightStore } from '@/store/lightStore';
 import { useHistoryStore } from '@/store/historyStore';
+import { tickTextureUvAnimations } from '@/utils/textureAnimationRuntime';
+import { disposeObject3DResources } from '@/utils/sceneUtils';
 import {
   applyRendererLightingDefaults,
   applyDirectionalShadowSettings,
@@ -160,6 +162,8 @@ export function EditorViewport() {
   const transformControlsRef = useRef<TransformControls | null>(null);
   const gizmoHelperRef = useRef<THREE.Object3D | null>(null);
   const animationFrameRef = useRef<number>(0);
+  const timerRef = useRef(new THREE.Timer());
+  const renderLoopActiveRef = useRef(false);
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const initializedRef = useRef(false); // 防止React严格模式下重复初始化
   const composerRef = useRef<EffectComposer | null>(null); // 后期处理Composer
@@ -173,6 +177,8 @@ export function EditorViewport() {
   const { camera, backgroundColor, objects, selectedIds, selectObject, deselectAll, updateObject, registerThreeObject, addObject } = useSceneStore();
   const { gridVisible, axesVisible, currentTool } = useEditorStore();
   const { handleFileImport } = useModelLoader();
+  const handleFileImportRef = useRef(handleFileImport);
+  handleFileImportRef.current = handleFileImport;
   const { lights } = useLightStore();
   const { selectedLightId, selectLight, updateLight } = useLightStore();
   const lightsRef = useRef<Map<string, THREE.Light>>(new Map());
@@ -428,8 +434,8 @@ export function EditorViewport() {
   const initScene = useCallback(() => {
     if (!containerRef.current) return;
     
-    // 防止React严格模式下重复初始化
-    if (initializedRef.current) {
+    // 防止重复初始化；若场景已被卸载则允许重新创建
+    if (initializedRef.current && sceneRef.current) {
       return;
     }
     initializedRef.current = true;
@@ -444,11 +450,12 @@ export function EditorViewport() {
     sceneRef.current = scene;
 
     // 创建相机
+    const initialCamera = useSceneStore.getState().camera;
     const cameraObj = new THREE.PerspectiveCamera(
-      camera.fov,
+      initialCamera.fov,
       containerRef.current.clientWidth / containerRef.current.clientHeight,
-      camera.near,
-      camera.far
+      initialCamera.near,
+      initialCamera.far
     );
     cameraObj.position.set(16.28, 7.4, 15.79); // 初始相机坐标
     cameraRef.current = cameraObj;
@@ -804,7 +811,7 @@ export function EditorViewport() {
 
       const files = e.dataTransfer?.files;
       if (files && files.length > 0) {
-        await handleFileImport(files, scene);
+        await handleFileImportRef.current(files, scene);
       }
     };
 
@@ -816,7 +823,7 @@ export function EditorViewport() {
     (window as any).__editorDragOverHandler = handleDragOver;
     (window as any).__editorDropHandler = handleDrop;
 
-    }, [backgroundColor, camera, deselectAll, handleFileImport]);
+    }, []);
 
   // 应用后期处理效果
   const applyPostProcessEffect = useCallback((effectName: string, config: any) => {
@@ -1037,6 +1044,7 @@ export function EditorViewport() {
   const postProcessGlitchDtRef = useRef<number>(64);
   
   const animate = useCallback(() => {
+    if (!renderLoopActiveRef.current) return;
     animationFrameRef.current = requestAnimationFrame(animate);
     
     if (controlsRef.current) {
@@ -1052,6 +1060,16 @@ export function EditorViewport() {
       }
     });
     
+    // 贴图 UV 偏移动画
+    timerRef.current.update();
+    if (sceneRef.current) {
+      tickTextureUvAnimations(
+        sceneRef.current,
+        timerRef.current.getDelta(),
+        useSceneStore.getState().getThreeObject
+      );
+    }
+
     // 检查后期处理配置变化(从全局读取)
     const postConfig = (window as any).__postProcessConfig;
     if (postConfig && postConfig.enabled) {
@@ -1079,7 +1097,9 @@ export function EditorViewport() {
     } else {
       // 未启用后期处理,使用普通renderer
       if (postProcessEnabledRef.current || composerRef.current) {
-        // 从启用状态变为关闭,清理composer
+        if (composerRef.current) {
+          composerRef.current.dispose();
+        }
         composerRef.current = null;
         currentPassRef.current = null;
         postProcessEnabledRef.current = false;
@@ -1107,36 +1127,79 @@ export function EditorViewport() {
     }
   }, []);
 
-  // 初始化
+  // 初始化与渲染循环（仅挂载一次，避免重复创建 WebGL 上下文）
   useEffect(() => {
+    timerRef.current.connect(document);
     initScene();
+    renderLoopActiveRef.current = true;
     animate();
     window.addEventListener('resize', handleResize);
 
     return () => {
+      renderLoopActiveRef.current = false;
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameRef.current);
-      
-      // 清理场景中的所有对象(防止内存泄漏)
-      if (sceneRef.current) {
-        const toRemove: THREE.Object3D[] = [];
-        sceneRef.current.children.forEach((child) => {
-          toRemove.push(child);
-        });
-        toRemove.forEach((child) => sceneRef.current!.remove(child));
+      timerRef.current.disconnect();
+
+      lightHelpersRef.current.forEach((helper) => disposeLightHelper(helper));
+      lightHelpersRef.current.clear();
+      lightsRef.current.clear();
+
+      if (transformControlsRef.current) {
+        transformControlsRef.current.detach();
+        transformControlsRef.current.disconnect();
+        transformControlsRef.current.dispose();
+        transformControlsRef.current = null;
       }
-      
-      // 清理全局引用和初始化标志(允许React严格模式下重新初始化)
+
+      if (controlsRef.current) {
+        controlsRef.current.dispose();
+        controlsRef.current = null;
+      }
+
+      if (composerRef.current) {
+        composerRef.current.dispose();
+        composerRef.current = null;
+        currentPassRef.current = null;
+      }
+
+      const scene = sceneRef.current;
+      sceneRef.current = null;
+
+      if (scene) {
+        const lightsInScene: THREE.Light[] = [];
+        scene.traverse((child) => {
+          if (child instanceof THREE.Light) {
+            lightsInScene.push(child);
+          }
+        });
+        lightsInScene.forEach((light) => removeLightTargetFromScene(scene, light));
+
+        const children = [...scene.children];
+        children.forEach((child) => {
+          disposeObject3DResources(child);
+          scene.remove(child);
+        });
+      }
+
       delete (window as any).__editorScene;
+      delete (window as any).__editorRenderer;
+      delete (window as any).__editorCamera;
+      delete (window as any).__editorControls;
+      delete (window as any).__editorTransformControls;
       delete (window as any).__sceneInitialized;
-      initializedRef.current = false; // 重置初始化标志,允许重新初始化
-      
-      if (rendererRef.current && containerRef.current) {
-        containerRef.current.removeChild(rendererRef.current.domElement);
+      initializedRef.current = false;
+
+      if (rendererRef.current) {
+        if (containerRef.current?.contains(rendererRef.current.domElement)) {
+          containerRef.current.removeChild(rendererRef.current.domElement);
+        }
         rendererRef.current.dispose();
+        rendererRef.current = null;
       }
     };
-  }, [initScene, animate, handleResize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 视口生命周期内只初始化一次
+  }, []);
 
   // 控制网格和坐标轴显示
   useEffect(() => {

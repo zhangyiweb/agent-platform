@@ -74,3 +74,48 @@ export function createExportScene(source: THREE.Scene): THREE.Scene {
 
   return exportScene;
 }
+
+const DISPOSE_TEXTURE_KEYS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'emissiveMap',
+  'aoMap',
+  'bumpMap',
+  'alphaMap',
+  'displacementMap',
+] as const;
+
+function disposeMaterial(material: THREE.Material) {
+  DISPOSE_TEXTURE_KEYS.forEach((key) => {
+    const texture = (material as unknown as Record<string, THREE.Texture | undefined>)[key];
+    texture?.dispose();
+  });
+  material.dispose();
+}
+
+/** 释放 Object3D 及其子节点占用的 GPU 资源 */
+export function disposeObject3DResources(root: THREE.Object3D | null | undefined) {
+  if (!root) return;
+  root.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry?.dispose();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => {
+        if (material) disposeMaterial(material);
+      });
+      return;
+    }
+
+    if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
+      child.geometry?.dispose();
+      const lineMat = child.material;
+      if (Array.isArray(lineMat)) {
+        lineMat.forEach((material) => material?.dispose());
+      } else {
+        lineMat?.dispose();
+      }
+    }
+  });
+}

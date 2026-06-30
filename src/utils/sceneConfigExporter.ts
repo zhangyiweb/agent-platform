@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { useSceneStore } from '@/store/sceneStore';
 import { useLightStore } from '@/store/lightStore';
+import { useAnimationStore } from '@/store/animationStore';
 
 const TONE_MAPPING_BY_NAME: Record<string, number> = {
   none: THREE.NoToneMapping,
@@ -22,6 +23,7 @@ export interface ExportedSceneConfig {
   editor: {
     objects: ReturnType<typeof useSceneStore.getState>['objects'];
     lights: ReturnType<typeof useLightStore.getState>['lights'];
+    textureUvAnimations: ReturnType<typeof useAnimationStore.getState>['textureUvAnimations'];
     settings: Record<string, unknown> | null;
   };
   scene: {
@@ -223,6 +225,7 @@ export function generateSceneConfig(): ExportedSceneConfig {
 
   const editorObjects = useSceneStore.getState().objects;
   const editorLights = useLightStore.getState().lights;
+  const textureUvAnimations = useAnimationStore.getState().textureUvAnimations;
 
   const runtimeLights: Array<Record<string, unknown>> = [];
   scene.traverse((child) => {
@@ -271,6 +274,7 @@ export function generateSceneConfig(): ExportedSceneConfig {
     editor: {
       objects: editorObjects,
       lights: editorLights,
+      textureUvAnimations,
       settings: globalSettings,
     },
     scene: {

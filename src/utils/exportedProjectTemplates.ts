@@ -175,6 +175,43 @@ async function loadModel(path) {
   });
 }
 
+function findObjectById(root, id) {
+  let found = null;
+  root.traverse((child) => {
+    if (found) return;
+    const cid = child.userData?.id || child.userData?.businessId || child.uuid;
+    if (cid === id) found = child;
+  });
+  return found;
+}
+
+function tickTextureUvAnimations(root, animations, delta) {
+  if (!animations || delta <= 0) return;
+  const keysAll = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'bumpMap'];
+
+  Object.entries(animations).forEach(([objectId, cfg]) => {
+    if (!cfg?.enabled) return;
+    if (!cfg.speedU && !cfg.speedV) return;
+    const object = findObjectById(root, objectId);
+    if (!object) return;
+    const keys = cfg.target === 'all' ? keysAll : ['map'];
+
+    object.traverse((child) => {
+      if (!child.isMesh) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((mat) => {
+        if (!mat) return;
+        keys.forEach((key) => {
+          const tex = mat[key];
+          if (!tex) return;
+          tex.offset.x += (cfg.speedU || 0) * delta;
+          tex.offset.y += (cfg.speedV || 0) * delta;
+        });
+      });
+    });
+  });
+}
+
 async function bootstrap() {
   const config = await fetch('./config/scene.json').then((r) => r.json());
   const assets = config.assets || {};
@@ -195,7 +232,7 @@ async function bootstrap() {
   );
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = rendererCfg.shadowMapEnabled !== false;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = TONE_MAPPING[rendererCfg.toneMapping] ?? THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = rendererCfg.toneMappingExposure ?? 0.4;
   if (rendererCfg.correctLights === true) {
@@ -270,8 +307,14 @@ async function bootstrap() {
     });
   }
 
+  const textureUvAnimations = config.editor?.textureUvAnimations || {};
+  const timer = new THREE.Timer();
+  timer.connect(document);
+
   function animate() {
     requestAnimationFrame(animate);
+    timer.update();
+    tickTextureUvAnimations(scene, textureUvAnimations, timer.getDelta());
     controls.update();
     renderer.render(scene, camera);
   }
@@ -330,6 +373,7 @@ python -m http.server 8080
 - **改模型**：替换 \`assets/models/scene.glb\`，或在 \`js/main.js\` 中加载更多资源。
 - **改灯光 / 相机**：编辑 \`config/scene.json\`，\`runtimeLights\` 为场景中实际灯光数据。
 - **改 HDR**：替换 \`assets/hdr/\` 下文件，并更新 \`scene.json\` 中 \`assets.hdr\` 路径。
+- **贴图动画**：\`config/scene.json\` 的 \`editor.textureUvAnimations\` 保存 UV 偏移动画，\`main.js\` 已自动播放。
 - **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存了编辑器中的后期参数，\`main.js\` 未内置完整后期管线，可按需接入 EffectComposer。
 
 ## 依赖

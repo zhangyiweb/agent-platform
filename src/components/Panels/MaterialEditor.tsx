@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
+import { TextureAnimationSection } from './TextureAnimationSection';
 
 interface MaterialEditorProps {
   material: THREE.Material | null;
@@ -87,6 +88,11 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
   const [uvRotation, setUvRotation] = useState(0);
   const [wrapS, setWrapS] = useState<number>(THREE.RepeatWrapping);
   const [wrapT, setWrapT] = useState<number>(THREE.RepeatWrapping);
+
+  const objectId = useMemo(() => {
+    if (!object3D) return null;
+    return (object3D.userData?.id || object3D.userData?.businessId || object3D.uuid) as string;
+  }, [object3D]);
 
   // 当材质变化时,更新参数
   useEffect(() => {
@@ -1088,6 +1094,8 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
           <p className="text-[10px] text-gray-600 mt-2">同步应用于所有已加载贴图</p>
         </div>
       )}
+
+      <TextureAnimationSection objectId={objectId} material={material} />
 
       {/* Phong参数 */}
       {hasPhongParams && (

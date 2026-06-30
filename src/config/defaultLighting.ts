@@ -51,7 +51,7 @@ export function applyRendererLightingDefaults(
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = exposure;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
 }
 
 /** 程序化 IBL：RoomEnvironment（按需调用，非默认） */

@@ -130,8 +130,10 @@ export function GlobalSettings() {
     bgColorRef.current = bgColor; // 更新ref
   }, [bgColor]);
 
-  // 实时同步视口相机 / 控制点到面板（从 Three.js 对象读取，避免监听器失效）
+  // 实时同步视口相机 / 控制点（仅「渲染」Tab 激活时轮询，降低无效 setState）
   useEffect(() => {
+    if (activeTab !== 'render') return;
+
     let rafId = 0;
 
     const round2 = (n: number) => parseFloat(n.toFixed(2));
@@ -170,7 +172,7 @@ export function GlobalSettings() {
     rafId = requestAnimationFrame(syncFromViewport);
 
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [activeTab]);
 
   // 同步雾效到场景
   useEffect(() => {
@@ -255,7 +257,7 @@ export function GlobalSettings() {
       renderer.toneMappingExposure = exposure;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
     }
 
     // Three.js r185: 环境反射强度在 Scene 上，不是 Renderer
