@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSceneStore } from '@/store/sceneStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useLightStore } from '@/store/lightStore'
-import { useHistoryStore } from '@/store/historyStore'
 import { EditorViewport } from '@/components/Viewport/EditorViewport'
 import { SceneTree } from '@/components/Panels/SceneTree'
 import { ComponentLibrary } from '@/components/Panels/ComponentLibrary'
@@ -20,7 +19,6 @@ function App() {
   const { selectedIds, objects } = useSceneStore();
   const { lights } = useLightStore();
   const { currentTool } = useEditorStore();
-  const { canUndo, canRedo } = useHistoryStore();
   
   // 统计信息
   const [fps, setFps] = useState(60);
@@ -157,12 +155,6 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           <span>对象数: {objects.length}</span>
-          <span className={canUndo() ? 'text-white' : ''}>
-            {canUndo() ? '↩️ 可撤销' : ''}
-          </span>
-          <span className={canRedo() ? 'text-white' : ''}>
-            {canRedo() ? '↪️ 可重做' : ''}
-          </span>
           <span>FPS: {fps}</span>
           <span>对象: {objectCount}</span>
           <span>三角面: {triangleCount.toLocaleString()}</span>

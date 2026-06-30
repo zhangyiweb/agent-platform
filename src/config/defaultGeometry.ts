@@ -226,7 +226,7 @@ export const PRIMITIVE_PRESETS: Record<PrimitiveGeometryType, PrimitivePreset> =
       ),
   },
   edges: {
-    name: '边缘线框',
+    name: '硬边线',
     kind: 'line',
     ...MESH_DEFAULTS,
     castShadow: false,
@@ -238,7 +238,7 @@ export const PRIMITIVE_PRESETS: Record<PrimitiveGeometryType, PrimitivePreset> =
       ),
   },
   wireframe: {
-    name: '线框',
+    name: '三角线框',
     kind: 'mesh',
     ...MESH_DEFAULTS,
     castShadow: false,

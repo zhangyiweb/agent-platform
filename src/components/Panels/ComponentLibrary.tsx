@@ -105,6 +105,36 @@ export function ComponentLibrary() {
     }
   };
 
+  const lightItems: { type: 'ambient' | 'directional' | 'point' | 'spot' | 'hemisphere'; label: string }[] = [
+    { type: 'ambient', label: '环境光' },
+    { type: 'directional', label: '平行光' },
+    { type: 'point', label: '点光源' },
+    { type: 'spot', label: '聚光灯' },
+    { type: 'hemisphere', label: '半球光' },
+  ];
+
+  const geometryItems: { type: PrimitiveGeometryType; label: string }[] = [
+    { type: 'box', label: '立方体' },
+    { type: 'sphere', label: '球体' },
+    { type: 'cylinder', label: '圆柱体' },
+    { type: 'plane', label: '平面' },
+    { type: 'cone', label: '圆锥体' },
+    { type: 'capsule', label: '胶囊体' },
+    { type: 'circle', label: '圆形' },
+    { type: 'ring', label: '圆环' },
+    { type: 'torus', label: '圆环体' },
+    { type: 'torusKnot', label: '圆环结' },
+    { type: 'dodecahedron', label: '十二面体' },
+    { type: 'icosahedron', label: '二十面体' },
+    { type: 'octahedron', label: '八面体' },
+    { type: 'tetrahedron', label: '四面体' },
+    { type: 'edges', label: '硬边线' },
+    { type: 'wireframe', label: '三角线框' },
+  ];
+
+  const itemButtonClass =
+    'px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors';
+
   return (
     <div className="h-full flex flex-col bg-gray-900 border-t border-gray-700">
       {/* Tab栏 */}
@@ -135,137 +165,31 @@ export function ComponentLibrary() {
       <div className="flex-1 overflow-y-auto p-3">
         {activeTab === 'lights' && (
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleAddLight('ambient')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              环境光
-            </button>
-            <button
-              onClick={() => handleAddLight('directional')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              平行光
-            </button>
-            <button
-              onClick={() => handleAddLight('point')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              点光源
-            </button>
-            <button
-              onClick={() => handleAddLight('spot')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              聚光灯
-            </button>
-            <button
-              onClick={() => handleAddLight('hemisphere')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors col-span-2"
-            >
-              半球光
-            </button>
+            {lightItems.map(({ type, label }) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => handleAddLight(type)}
+                className={itemButtonClass}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         )}
 
         {activeTab === 'geometry' && (
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleAddGeometry('box')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              立方体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('sphere')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              球体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('cylinder')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆柱体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('plane')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              平面
-            </button>
-            <button
-              onClick={() => handleAddGeometry('cone')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆锥体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('capsule')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              胶囊体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('circle')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆形
-            </button>
-            <button
-              onClick={() => handleAddGeometry('ring')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆环
-            </button>
-            <button
-              onClick={() => handleAddGeometry('torus')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆环体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('torusKnot')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              圆环结
-            </button>
-            <button
-              onClick={() => handleAddGeometry('dodecahedron')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              十二面体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('icosahedron')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              二十面体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('octahedron')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              八面体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('tetrahedron')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              四面体
-            </button>
-            <button
-              onClick={() => handleAddGeometry('edges')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-            >
-              边缘线框
-            </button>
-            <button
-              onClick={() => handleAddGeometry('wireframe')}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors col-span-2"
-            >
-              线框
-            </button>
+            {geometryItems.map(({ type, label }) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => handleAddGeometry(type)}
+                className={itemButtonClass}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         )}
       </div>
