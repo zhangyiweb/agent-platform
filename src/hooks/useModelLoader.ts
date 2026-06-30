@@ -1,11 +1,12 @@
 import { useCallback } from 'react';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import * as THREE from 'three';
 import { useSceneStore } from '@/store/sceneStore';
+import { enableMeshShadows } from '@/config/defaultLighting';
 
 export function useModelLoader() {
-  const { addObject } = useSceneStore();
+  const { addObject, registerThreeObject } = useSceneStore();
 
   const loadModel = useCallback(async (
     file: File,
@@ -23,13 +24,15 @@ export function useModelLoader() {
 
       loader.load(
         url,
-        (gltf) => {
+        (gltf: { scene: THREE.Group }) => {
           const model = gltf.scene;
           
           // 生成唯一ID
           const modelId = `model_${Date.now()}`;
           model.name = file.name.replace(/\.[^/.]+$/, ''); // 移除扩展名
           model.userData.id = modelId;
+
+          enableMeshShadows(model);
 
           // 计算原始包围盒和尺寸(仅用于日志显示)
           const box = new THREE.Box3().setFromObject(model);
@@ -54,6 +57,8 @@ export function useModelLoader() {
             scale: [model.scale.x, model.scale.y, model.scale.z],
           });
 
+          registerThreeObject(modelId, model);
+
           // 清理URL
           URL.revokeObjectURL(url);
           
@@ -62,14 +67,13 @@ export function useModelLoader() {
         (progress: ProgressEvent) => {
           // 加载进度回调
         },
-        (error: Error) => {
+        (error: unknown) => {
           URL.revokeObjectURL(url);
-
           reject(error);
         }
       );
     });
-  }, [addObject]);
+  }, [addObject, registerThreeObject]);
 
   const handleFileImport = useCallback(async (
     files: FileList | File[],

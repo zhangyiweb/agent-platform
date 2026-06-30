@@ -3,76 +3,108 @@ import { useSceneStore } from '@/store/sceneStore';
 import { useEditorStore } from '@/store/editorStore';
 import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { Switch, Typography } from 'antd';
+import { EnvironmentHdriSection } from './EnvironmentHdriSection';
+import { PostProcessSettings } from './PostProcessSettings';
+import {
+  fetchHdriUrl,
+  downloadHdrFromSource,
+  DEFAULT_RESOLUTION,
+  type HdriAsset,
+  type HdrResolution,
+  type HdrDownloadSource,
+} from '@/utils/polyhaven';
 
 export function GlobalSettings() {
   const { backgroundColor, updateCamera } = useSceneStore();
   const { gridVisible, axesVisible, toggleGrid, toggleAxes } = useEditorStore();
   const [activeTab, setActiveTab] = useState<'scene' | 'environment' | 'render' | 'postprocess'>('scene');
-  const [bgColor, setBgColor] = useState(backgroundColor); // 从store同步初始值
-  const [fogEnabled, setFogEnabled] = useState(false);
-  const [fogColor, setFogColor] = useState('#ffffff');
-  const [fogNear, setFogNear] = useState(1);
-  const [fogFar, setFogFar] = useState(100);
-  const [pixelRatio, setPixelRatio] = useState('2');
-  const [toneMapping, setToneMapping] = useState('aces');
-  const [exposure, setExposure] = useState(1.0);
-  const [envMapIntensity, setEnvMapIntensity] = useState(1.0);
-  const [correctLights, setCorrectLights] = useState(false);
-  const [cameraPosition, setCameraPosition] = useState({ x: 10, y: 10, z: 10 }); // 初始相机坐标(10, 10, 10)
-  const [controlsTarget, setControlsTarget] = useState({ x: 0, y: 0, z: 0 });
-  const [cameraFov, setCameraFov] = useState(45); // 默认45度
-  const [cameraNear, setCameraNear] = useState(0.1);
-  const [cameraFar, setCameraFar] = useState(5000);
-  const [antialias, setAntialias] = useState(true); // 抗锯齿
-  const [alpha, setAlpha] = useState(true); // 透明背景
-  const [logarithmicDepthBuffer, setLogarithmicDepthBuffer] = useState(true); // 对数深度缓冲区
-  const rendererRef = useRef<{antialias: boolean, alpha: boolean, logarithmicDepthBuffer: boolean} | null>(null); // 保存renderer配置
+  
+  // 从全局配置恢复状态(防止组件重挂载时重置)
+  const savedConfig = (window as any).__globalSettingsState;
+  
+  const [bgColor, setBgColor] = useState(savedConfig?.bgColor || backgroundColor); // 从store同步初始值
+  const [fogEnabled, setFogEnabled] = useState(savedConfig?.fogEnabled ?? false);
+  const [fogColor, setFogColor] = useState(savedConfig?.fogColor || '#ffffff');
+  const [fogNear, setFogNear] = useState(savedConfig?.fogNear ?? 1);
+  const [fogFar, setFogFar] = useState(savedConfig?.fogFar ?? 100);
+  const [pixelRatio, setPixelRatio] = useState(savedConfig?.pixelRatio || '2');
+  const [toneMapping, setToneMapping] = useState(savedConfig?.toneMapping || 'aces');
+  const [exposure, setExposure] = useState(savedConfig?.exposure ?? 0.4);
+  const [envMapIntensity, setEnvMapIntensity] = useState(savedConfig?.envMapIntensity ?? 1.0);
+  const [correctLights, setCorrectLights] = useState(savedConfig?.correctLights ?? false);
+  const [cameraPosition, setCameraPosition] = useState(savedConfig?.cameraPosition || { x: 10, y: 10, z: 10 });
+  const [controlsTarget, setControlsTarget] = useState(savedConfig?.controlsTarget || { x: 0, y: 0, z: 0 });
+  const [cameraFov, setCameraFov] = useState(savedConfig?.cameraFov ?? 45);
+  const [cameraNear, setCameraNear] = useState(savedConfig?.cameraNear ?? 0.1);
+  const [cameraFar, setCameraFar] = useState(savedConfig?.cameraFar ?? 5000);
+  const [antialias, setAntialias] = useState(savedConfig?.antialias ?? true);
+  const [alpha, setAlpha] = useState(savedConfig?.alpha ?? true);
+  const [logarithmicDepthBuffer, setLogarithmicDepthBuffer] = useState(savedConfig?.logarithmicDepthBuffer ?? true);
+  const rendererRef = useRef<{antialias: boolean, alpha: boolean, logarithmicDepthBuffer: boolean} | null>(null);
   
   // HDR状态跟踪
-  const [hasHDRBackground, setHasHDRBackground] = useState(false);
-  const [hasHDREnvironment, setHasHDREnvironment] = useState(false);
-  const [hdrBgName, setHdrBgName] = useState<string>('');
-  const [hdrEnvName, setHdrEnvName] = useState<string>('');
-  const hasHDRBackgroundRef = useRef(false); // 使用ref立即同步,避免异步问题
+  const [hasHDRBackground, setHasHDRBackground] = useState(savedConfig?.hasHDRBackground ?? false);
+  const [hasHDREnvironment, setHasHDREnvironment] = useState(savedConfig?.hasHDREnvironment ?? true);
+  const [hdrBgName, setHdrBgName] = useState<string>(savedConfig?.hdrBgName || '');
+  const [hdrEnvName, setHdrEnvName] = useState<string>(savedConfig?.hdrEnvName || 'RoomEnvironment');
+  const hasHDRBackgroundRef = useRef(savedConfig?.hasHDRBackground ?? false);
+  const bgHdriEnabledRef = useRef(savedConfig?.bgHdriEnabled ?? false);
+  const envHdriEnabledRef = useRef(savedConfig?.envHdriEnabled ?? true);
+
+  // Poly Haven HDRI
+  const [bgHdriEnabled, setBgHdriEnabled] = useState(savedConfig?.bgHdriEnabled ?? false);
+  const [envHdriEnabled, setEnvHdriEnabled] = useState(savedConfig?.envHdriEnabled ?? true);
+  const [selectedHdriId, setSelectedHdriId] = useState<string | null>(savedConfig?.selectedHdriId ?? null);
+  const [hdriResolution, setHdriResolution] = useState<HdrResolution>(savedConfig?.hdriResolution ?? DEFAULT_RESOLUTION);
+  const [loadingHdriId, setLoadingHdriId] = useState<string | null>(null);
+  const [hdriReady, setHdriReady] = useState(savedConfig?.hdriReady ?? false);
+  const [downloadingHdr, setDownloadingHdr] = useState(false);
+  const hdrTextureCache = useRef<THREE.Texture | null>(null);
+  const hdrDownloadSourceRef = useRef<HdrDownloadSource | null>(null);
+
+  useEffect(() => { bgHdriEnabledRef.current = bgHdriEnabled; }, [bgHdriEnabled]);
+  useEffect(() => { envHdriEnabledRef.current = envHdriEnabled; }, [envHdriEnabled]);
   
-  // 同步store的backgroundColor到本地状态(避免硬编码)
+  const isProgrammaticChange = useRef(false);
+  const isUserInputChange = useRef(false);
+  
+  // 同步场景中已有的 HDR 状态（仅当用户手动添加过 HDRI 时）
   useEffect(() => {
-    setBgColor(backgroundColor);
-  }, [backgroundColor]);
-  
-  // 后期处理参数
-  const [postProcessEnabled, setPostProcessEnabled] = useState(false);
-  const [selectedEffect, setSelectedEffect] = useState<string>('none');
-  const [bloomIntensity, setBloomIntensity] = useState(1.0);
-  const [bloomRadius, setBloomRadius] = useState(0.4);
-  const [bloomThreshold, setBloomThreshold] = useState(0.85);
-  const [vignetteDarkness, setVignetteDarkness] = useState(0.5);
-  const [filmGrain, setFilmGrain] = useState(0.1);
-  const [pixelSize, setPixelSize] = useState(2.0);
-  const [glitchIntensity, setGlitchIntensity] = useState(0.5);
-  const [chromaticAmount, setChromaticAmount] = useState(0.002);
-  const hdrFileRef = useRef<HTMLInputElement>(null);
-  const hdrBgFileRef = useRef<HTMLInputElement>(null);
-  const hdrEnvFileRef = useRef<HTMLInputElement>(null);
-  const isProgrammaticChange = useRef(false); // 标记是否为程序化更改(代码修改相机)
-  const isUserInputChange = useRef(false); // 标记是否为用户手动输入
-  
-  // 初始化HDR状态 - 同步场景的当前状态
-  useEffect(() => {
-    const scene = (window as any).__editorScene;
-    if (scene) {
-      // 检查是否有HDR背景
-      if (scene.background && scene.background.isTexture) {
-        setHasHDRBackground(true);
-        setHdrBgName('HDR Background');
+    let retryCount = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const syncHdrState = () => {
+      const scene = (window as any).__editorScene as THREE.Scene | undefined;
+      if (!scene) {
+        if (retryCount++ < 50) {
+          timer = setTimeout(syncHdrState, 100);
+        }
+        return;
       }
-      // 检查是否有HDR环境
+
+      if (scene.background && (scene.background as THREE.Texture).isTexture) {
+        setHasHDRBackground(true);
+        hasHDRBackgroundRef.current = true;
+        hdrTextureCache.current = scene.background as THREE.Texture;
+        setHdriReady(true);
+      }
+
       if (scene.environment) {
         setHasHDREnvironment(true);
-        setHdrEnvName('HDR Environment');
+        if (!hdrTextureCache.current) {
+          hdrTextureCache.current = scene.environment;
+        }
+        scene.environmentIntensity = envMapIntensity;
+        setHdriReady(true);
       }
-    }
-  }, []);
+    };
+
+    timer = setTimeout(syncHdrState, 100);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [envMapIntensity]);
 
   // 同步背景颜色到场景(只在用户主动修改bgColor时生效)
   // 重要:不要在组件挂载时自动设置,会覆盖HDR!
@@ -98,74 +130,46 @@ export function GlobalSettings() {
     bgColorRef.current = bgColor; // 更新ref
   }, [bgColor]);
 
-  // 初始化相机位置并设置监听器 - 使用重试机制确保获取到相机和控制器
+  // 实时同步视口相机 / 控制点到面板（从 Three.js 对象读取，避免监听器失效）
   useEffect(() => {
-    let animationFrameId: number;
-    let retryCount = 0;
-    const maxRetries = 50; // 最多重试50次(5秒)
-    
-    const setupCameraListener = () => {
-      const camera = (window as any).__editorCamera;
-      const controls = (window as any).__editorControls;
-      
-      // 如果相机和控制器都准备好了,设置监听器
-      if (camera && controls) {
-        // 更新初始相机位置
-        setCameraPosition({
-          x: parseFloat(camera.position.x.toFixed(2)),
-          y: parseFloat(camera.position.y.toFixed(2)),
-          z: parseFloat(camera.position.z.toFixed(2))
-        });
-        
-        // 更新初始控制点位置
-        setControlsTarget({
-          x: parseFloat(controls.target.x.toFixed(2)),
-          y: parseFloat(controls.target.y.toFixed(2)),
-          z: parseFloat(controls.target.z.toFixed(2))
-        });
+    let rafId = 0;
 
-        // 创建监听器 - 当相机移动时更新UI
-        const updateCameraUI = () => {
-          // 如果是程序化更改,不更新UI(避免无限循环)
-          if (isProgrammaticChange.current) return;
-          
-          setCameraPosition({
-            x: parseFloat(camera.position.x.toFixed(2)),
-            y: parseFloat(camera.position.y.toFixed(2)),
-            z: parseFloat(camera.position.z.toFixed(2))
-          });
-          setControlsTarget({
-            x: parseFloat(controls.target.x.toFixed(2)),
-            y: parseFloat(controls.target.y.toFixed(2)),
-            z: parseFloat(controls.target.z.toFixed(2))
-          });
-        };
+    const round2 = (n: number) => parseFloat(n.toFixed(2));
 
-        // 监听change事件(相机移动时触发)
-        controls.addEventListener('change', updateCameraUI);
-        
+    const syncFromViewport = () => {
+      if (!isProgrammaticChange.current && !isUserInputChange.current) {
+        const camera = (window as any).__editorCamera as THREE.PerspectiveCamera | undefined;
+        const controls = (window as any).__editorControls as { target: THREE.Vector3 } | undefined;
 
+        if (camera) {
+          const nextPos = {
+            x: round2(camera.position.x),
+            y: round2(camera.position.y),
+            z: round2(camera.position.z),
+          };
+          setCameraPosition((prev: { x: number; y: number; z: number }) =>
+            prev.x === nextPos.x && prev.y === nextPos.y && prev.z === nextPos.z ? prev : nextPos
+          );
+        }
 
-        return () => {
-          controls.removeEventListener('change', updateCameraUI);
-        };
-      } else if (retryCount < maxRetries) {
-        // 还没准备好,继续重试
-        retryCount++;
-        animationFrameId = requestAnimationFrame(setupCameraListener);
-      } else {
-
+        if (controls) {
+          const nextTarget = {
+            x: round2(controls.target.x),
+            y: round2(controls.target.y),
+            z: round2(controls.target.z),
+          };
+          setControlsTarget((prev: { x: number; y: number; z: number }) =>
+            prev.x === nextTarget.x && prev.y === nextTarget.y && prev.z === nextTarget.z ? prev : nextTarget
+          );
+        }
       }
+
+      rafId = requestAnimationFrame(syncFromViewport);
     };
-    
-    // 开始重试机制
-    animationFrameId = requestAnimationFrame(setupCameraListener);
-    
-    return () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-    };
+
+    rafId = requestAnimationFrame(syncFromViewport);
+
+    return () => cancelAnimationFrame(rafId);
   }, []);
 
   // 同步雾效到场景
@@ -205,6 +209,23 @@ export function GlobalSettings() {
     }
   }, [cameraPosition]);
 
+  // 同步控制点位置到 OrbitControls — 仅用户手动输入时
+  useEffect(() => {
+    if (!isUserInputChange.current) return;
+
+    const controls = (window as any).__editorControls as { target: THREE.Vector3; update: () => void } | undefined;
+    if (controls) {
+      isProgrammaticChange.current = true;
+      controls.target.set(controlsTarget.x, controlsTarget.y, controlsTarget.z);
+      controls.update();
+
+      requestAnimationFrame(() => {
+        isProgrammaticChange.current = false;
+        isUserInputChange.current = false;
+      });
+    }
+  }, [controlsTarget]);
+
   // 同步相机其他参数(FOV, Near, Far)
   useEffect(() => {
     const camera = (window as any).__editorCamera;
@@ -218,9 +239,10 @@ export function GlobalSettings() {
 
   // 同步渲染参数
   useEffect(() => {
-    const renderer = (window as any).__editorRenderer;
+    const renderer = (window as any).__editorRenderer as THREE.WebGLRenderer | undefined;
+    const scene = (window as any).__editorScene as THREE.Scene | undefined;
+
     if (renderer) {
-      // 色调映射
       const toneMappingMap: Record<string, number> = {
         none: THREE.NoToneMapping,
         linear: THREE.LinearToneMapping,
@@ -229,13 +251,16 @@ export function GlobalSettings() {
         aces: THREE.ACESFilmicToneMapping,
         custom: THREE.CustomToneMapping,
       };
-      renderer.toneMapping = toneMappingMap[toneMapping] ?? THREE.ACESFilmicToneMapping;
-      
-      // 曝光度
+      renderer.toneMapping = (toneMappingMap[toneMapping] ?? THREE.ACESFilmicToneMapping) as THREE.ToneMapping;
       renderer.toneMappingExposure = exposure;
-      
-      // 环境贴图强度
-      renderer.environmentIntensity = envMapIntensity;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
+
+    // Three.js r185: 环境反射强度在 Scene 上，不是 Renderer
+    if (scene) {
+      scene.environmentIntensity = envMapIntensity;
     }
   }, [toneMapping, exposure, envMapIntensity]);
 
@@ -271,146 +296,252 @@ export function GlobalSettings() {
     }
   }, []);
 
+  // 将 HDR 贴图应用到场景（按开关状态，可只更新背景或环境其中一项）
+  const applyHdrToScene = useCallback((
+    texture: THREE.Texture,
+    options: { bg?: boolean; env?: boolean }
+  ) => {
+    const scene = (window as any).__editorScene;
+    if (!scene) return;
+
+    if (options.bg !== undefined) {
+      if (options.bg) {
+        scene.background = texture;
+        setHasHDRBackground(true);
+        hasHDRBackgroundRef.current = true;
+      } else {
+        scene.background = new THREE.Color(bgColor);
+        setHasHDRBackground(false);
+        hasHDRBackgroundRef.current = false;
+      }
+    }
+
+    if (options.env !== undefined) {
+      if (options.env) {
+        scene.environment = texture;
+        scene.environmentIntensity = envMapIntensity;
+        setHasHDREnvironment(true);
+      } else {
+        scene.environment = null;
+        setHasHDREnvironment(false);
+      }
+    }
+  }, [bgColor, envMapIntensity]);
+
+  const loadHdrFromUrl = useCallback((url: string): Promise<THREE.Texture> => {
+    return new Promise((resolve, reject) => {
+      const loader = new HDRLoader();
+      loader.load(
+        url,
+        (texture) => {
+          texture.mapping = THREE.EquirectangularReflectionMapping;
+          resolve(texture);
+        },
+        undefined,
+        reject
+      );
+    });
+  }, []);
+
   // 加载HDR文件作为背景或环境
   const handleLoadHDR = useCallback(async (file: File, asBackground: boolean) => {
     const scene = (window as any).__editorScene;
-    const renderer = (window as any).__editorRenderer;
-    
-    if (!scene || !renderer) return;
+    if (!scene) return;
 
     const loader = new HDRLoader();
     const url = URL.createObjectURL(file);
 
     loader.load(url, (texture) => {
       texture.mapping = THREE.EquirectangularReflectionMapping;
+      const isFirstHdr = !hdrTextureCache.current;
 
-      if (asBackground) {
-        // 作为背景 - 立即设置ref
-        scene.background = texture;
-        setHasHDRBackground(true);
-        hasHDRBackgroundRef.current = true; // 立即同步到ref
+      hdrTextureCache.current = texture;
+      setSelectedHdriId(null);
+      setHdriReady(true);
+      hdrDownloadSourceRef.current = { kind: 'file', file };
+
+      if (isFirstHdr) {
+        setBgHdriEnabled(true);
+        setEnvHdriEnabled(true);
+        bgHdriEnabledRef.current = true;
+        envHdriEnabledRef.current = true;
         setHdrBgName(file.name);
-      } else {
-        // 作为环境
-        scene.environment = texture;
-        setHasHDREnvironment(true);
         setHdrEnvName(file.name);
+        applyHdrToScene(texture, { bg: true, env: true });
+      } else if (asBackground) {
+        setHdrBgName(file.name);
+        if (bgHdriEnabledRef.current) {
+          applyHdrToScene(texture, { bg: true });
+        }
+      } else {
+        setHdrEnvName(file.name);
+        if (envHdriEnabledRef.current) {
+          applyHdrToScene(texture, { env: true });
+        }
       }
 
       URL.revokeObjectURL(url);
     });
-  }, []);
+  }, [applyHdrToScene]);
+
+  // 从 Poly Haven 选择 HDRI
+  const handlePolyhavenSelect = useCallback(async (asset: HdriAsset) => {
+    const scene = (window as any).__editorScene;
+    if (!scene) return;
+
+    setLoadingHdriId(asset.id);
+    const isFirstHdr = !hdrTextureCache.current;
+    try {
+      const { url, resolution: actualRes } = await fetchHdriUrl(asset.id, hdriResolution);
+      const texture = await loadHdrFromUrl(url);
+
+      if (hdrTextureCache.current && hdrTextureCache.current !== texture) {
+        hdrTextureCache.current.dispose();
+      }
+      hdrTextureCache.current = texture;
+
+      const displayName = `${asset.name} (${actualRes})`;
+      setSelectedHdriId(asset.id);
+      setHdriReady(true);
+      hdrDownloadSourceRef.current = {
+        kind: 'polyhaven',
+        id: asset.id,
+        resolution: actualRes,
+        filename: `${asset.id}_${actualRes}.hdr`,
+      };
+      setHdrBgName(displayName);
+      setHdrEnvName(displayName);
+
+      if (isFirstHdr) {
+        setBgHdriEnabled(true);
+        setEnvHdriEnabled(true);
+        bgHdriEnabledRef.current = true;
+        envHdriEnabledRef.current = true;
+        applyHdrToScene(texture, { bg: true, env: true });
+      } else {
+        applyHdrToScene(texture, {
+          bg: bgHdriEnabledRef.current,
+          env: envHdriEnabledRef.current,
+        });
+      }
+    } catch (err) {
+      console.error('HDRI 加载失败:', err);
+      alert(err instanceof Error ? err.message : 'HDRI 加载失败，请检查网络后重试');
+    } finally {
+      setLoadingHdriId(null);
+    }
+  }, [hdriResolution, loadHdrFromUrl, applyHdrToScene]);
+
+  const handleDownloadCurrentHdr = useCallback(async () => {
+    const source = hdrDownloadSourceRef.current;
+    if (!source || !hdriReady) {
+      alert('当前没有可下载的 HDR，请先选择或上传 HDRI');
+      return;
+    }
+
+    setDownloadingHdr(true);
+    try {
+      await downloadHdrFromSource(source);
+    } catch (err) {
+      console.error('HDR 下载失败:', err);
+      alert(err instanceof Error ? err.message : 'HDR 下载失败，请检查网络后重试');
+    } finally {
+      setDownloadingHdr(false);
+    }
+  }, [hdriReady]);
+
+  const toggleBgHdri = useCallback((enabled?: boolean) => {
+    const scene = (window as any).__editorScene;
+    if (!scene || !hdrTextureCache.current) return;
+
+    const next = enabled ?? !bgHdriEnabled;
+    setBgHdriEnabled(next);
+    bgHdriEnabledRef.current = next;
+    if (next) {
+      scene.background = hdrTextureCache.current;
+      setHasHDRBackground(true);
+      hasHDRBackgroundRef.current = true;
+    } else {
+      scene.background = new THREE.Color(bgColor);
+      setHasHDRBackground(false);
+      hasHDRBackgroundRef.current = false;
+    }
+  }, [bgHdriEnabled, bgColor]);
+
+  const toggleEnvHdri = useCallback((enabled?: boolean) => {
+    const scene = (window as any).__editorScene;
+    if (!scene || !hdrTextureCache.current) return;
+
+    const next = enabled ?? !envHdriEnabled;
+    setEnvHdriEnabled(next);
+    envHdriEnabledRef.current = next;
+    if (next) {
+      scene.environment = hdrTextureCache.current;
+      scene.environmentIntensity = envMapIntensity;
+      setHasHDREnvironment(true);
+    } else {
+      scene.environment = null;
+      setHasHDREnvironment(false);
+    }
+  }, [envHdriEnabled, envMapIntensity]);
 
   // 清除HDR背景
   const handleClearBackground = useCallback(() => {
     const scene = (window as any).__editorScene;
     if (!scene) return;
-    
-    // 恢复为纯色背景
-    scene.background = new THREE.Color(backgroundColor);
+
+    scene.background = new THREE.Color(bgColor);
     setHasHDRBackground(false);
-    hasHDRBackgroundRef.current = false; // 立即同步到ref
+    hasHDRBackgroundRef.current = false;
     setHdrBgName('');
-  }, [backgroundColor]);
+    setBgHdriEnabled(false);
+    bgHdriEnabledRef.current = false;
+  }, [bgColor]);
 
   // 清除HDR环境
   const handleClearEnvironment = useCallback(() => {
     const scene = (window as any).__editorScene;
     if (!scene) return;
-    
-    // 清除环境贴图
+
     scene.environment = null;
     setHasHDREnvironment(false);
     setHdrEnvName('');
+    setEnvHdriEnabled(false);
+    envHdriEnabledRef.current = false;
   }, []);
 
-  // 初始化HDR状态 - 同步场景的当前状态
-  // 重要:每次组件挂载都要执行,因为GlobalSettings可能被卸载/重新挂载
+  // 同步全局设置状态(供组件重挂载恢复)
   useEffect(() => {
-    let retryCount = 0;
-    const maxRetries = 50; // 最多重试50次(5秒)
-    let checkInterval: NodeJS.Timeout | null = null;
-    
-    const checkScene = () => {
-      const scene = (window as any).__editorScene;
-      
-      if (!scene) {
-        // 场景还没初始化,等待重试
-        if (retryCount < maxRetries) {
-          retryCount++;
-          checkInterval = setTimeout(checkScene, 100);
-        }
-        return;
-      }
-      
-      // 场景已就绪,检查HDR状态
-      // 检查是否有HDR背景
-      if (scene.background && scene.background.isTexture) {
-        setHasHDRBackground(true);
-        hasHDRBackgroundRef.current = true;
-        setHdrBgName('HDR Background');
-      } else {
-        // 没有HDR背景
-        setHasHDRBackground(false);
-        hasHDRBackgroundRef.current = false;
-      }
-      
-      // 检查是否有HDR环境(可能是异步加载的,需要多次检查)
-      if (scene.environment) {
-        setHasHDREnvironment(true);
-        setHdrEnvName('HDR Environment');
-        // 找到了,停止重试
-        if (checkInterval) {
-          clearTimeout(checkInterval);
-        }
-      } else {
-        setHasHDREnvironment(false);
-        // 继续重试,等待HDR加载
-        if (retryCount < maxRetries) {
-          retryCount++;
-          checkInterval = setTimeout(checkScene, 100);
-        }
-      }
+    (window as any).__globalSettingsState = {
+      bgColor,
+      fogEnabled,
+      fogColor,
+      fogNear,
+      fogFar,
+      pixelRatio,
+      toneMapping,
+      exposure,
+      envMapIntensity,
+      correctLights,
+      cameraPosition,
+      controlsTarget,
+      cameraFov,
+      cameraNear,
+      cameraFar,
+      antialias,
+      alpha,
+      logarithmicDepthBuffer,
+      hasHDRBackground,
+      hasHDREnvironment,
+      hdrBgName,
+      hdrEnvName,
+      bgHdriEnabled,
+      envHdriEnabled,
+      selectedHdriId,
+      hdriResolution,
+      hdriReady,
     };
-    
-    // 延迟一下确保场景已初始化
-    setTimeout(checkScene, 100);
-    
-    // 清理定时器
-    return () => {
-      if (checkInterval) {
-        clearTimeout(checkInterval);
-      }
-    };
-  }, []);
-
-  // 同步后期处理参数到全局(供EditorViewport使用)
-  useEffect(() => {
-    (window as any).__postProcessConfig = {
-      enabled: postProcessEnabled,
-      effect: selectedEffect,
-      bloom: {
-        intensity: bloomIntensity,
-        radius: bloomRadius,
-        threshold: bloomThreshold
-      },
-      vignette: {
-        darkness: vignetteDarkness
-      },
-      film: {
-        grain: filmGrain
-      },
-      pixelate: {
-        size: pixelSize
-      },
-      glitch: {
-        intensity: glitchIntensity
-      },
-      chromatic: {
-        amount: chromaticAmount
-      }
-    };
-  }, [postProcessEnabled, selectedEffect, bloomIntensity, bloomRadius, bloomThreshold, vignetteDarkness, filmGrain, pixelSize, glitchIntensity, chromaticAmount]);
+  }, [bgColor, fogEnabled, fogColor, fogNear, fogFar, pixelRatio, toneMapping, exposure, envMapIntensity, correctLights, cameraPosition, controlsTarget, cameraFov, cameraNear, cameraFar, antialias, alpha, logarithmicDepthBuffer, hasHDRBackground, hasHDREnvironment, hdrBgName, hdrEnvName, bgHdriEnabled, envHdriEnabled, selectedHdriId, hdriResolution, hdriReady]);
 
   // 处理HDR文件选择
 
@@ -461,7 +592,13 @@ export function GlobalSettings() {
       </div>
 
       {/* 内容区 */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div
+        className={
+          activeTab === 'environment'
+            ? 'flex-1 min-h-0 flex flex-col overflow-hidden px-3 py-3 gap-2'
+            : 'flex-1 overflow-y-auto p-4 space-y-4'
+        }
+      >
         {/* 场景设置 */}
         {activeTab === 'scene' && (
           <>
@@ -494,7 +631,7 @@ export function GlobalSettings() {
                     value={cameraPosition.x}
                     onChange={(e) => {
                       isUserInputChange.current = true; // 标记为用户手动输入
-                      setCameraPosition(prev => ({...prev, x: parseFloat(e.target.value) || 0}))
+                      setCameraPosition((prev: {x: number, y: number, z: number}) => ({...prev, x: parseFloat(e.target.value) || 0}))
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -507,7 +644,7 @@ export function GlobalSettings() {
                     value={cameraPosition.y}
                     onChange={(e) => {
                       isUserInputChange.current = true; // 标记为用户手动输入
-                      setCameraPosition(prev => ({...prev, y: parseFloat(e.target.value) || 0}))
+                      setCameraPosition((prev: {x: number, y: number, z: number}) => ({...prev, y: parseFloat(e.target.value) || 0}))
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -520,7 +657,7 @@ export function GlobalSettings() {
                     value={cameraPosition.z}
                     onChange={(e) => {
                       isUserInputChange.current = true; // 标记为用户手动输入
-                      setCameraPosition(prev => ({...prev, z: parseFloat(e.target.value) || 0}))
+                      setCameraPosition((prev: {x: number, y: number, z: number}) => ({...prev, z: parseFloat(e.target.value) || 0}))
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -529,7 +666,7 @@ export function GlobalSettings() {
             </div>
 
             <div>
-              <h4 className="text-xs font-medium text-gray-300 mb-2">控制点位置 (OrbitControls.target)</h4>
+              <h4 className="text-xs font-medium text-gray-300 mb-2">控制点位置</h4>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="text-xs text-red-400 block mb-1">X</label>
@@ -538,10 +675,8 @@ export function GlobalSettings() {
                     step="0.1"
                     value={controlsTarget.x}
                     onChange={(e) => {
-                      const x = parseFloat(e.target.value) || 0;
-                      setControlsTarget(prev => ({...prev, x}));
-                      const controls = (window as any).__editorControls;
-                      if (controls) controls.target.x = x;
+                      isUserInputChange.current = true;
+                      setControlsTarget((prev: {x: number, y: number, z: number}) => ({...prev, x: parseFloat(e.target.value) || 0}));
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -553,10 +688,8 @@ export function GlobalSettings() {
                     step="0.1"
                     value={controlsTarget.y}
                     onChange={(e) => {
-                      const y = parseFloat(e.target.value) || 0;
-                      setControlsTarget(prev => ({...prev, y}));
-                      const controls = (window as any).__editorControls;
-                      if (controls) controls.target.y = y;
+                      isUserInputChange.current = true;
+                      setControlsTarget((prev: {x: number, y: number, z: number}) => ({...prev, y: parseFloat(e.target.value) || 0}));
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -568,10 +701,8 @@ export function GlobalSettings() {
                     step="0.1"
                     value={controlsTarget.z}
                     onChange={(e) => {
-                      const z = parseFloat(e.target.value) || 0;
-                      setControlsTarget(prev => ({...prev, z}));
-                      const controls = (window as any).__editorControls;
-                      if (controls) controls.target.z = z;
+                      isUserInputChange.current = true;
+                      setControlsTarget((prev: {x: number, y: number, z: number}) => ({...prev, z: parseFloat(e.target.value) || 0}));
                     }}
                     className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
                   />
@@ -665,192 +796,104 @@ export function GlobalSettings() {
 
         {/* 环境设置 */}
         {activeTab === 'environment' && (
-          <>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-300">启用雾效</span>
-              <button
-                onClick={() => setFogEnabled(!fogEnabled)}
-                className={`w-10 h-5 rounded-full transition-colors ${
-                  fogEnabled ? 'bg-green-500' : 'bg-gray-600'
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 bg-white rounded-full transform transition-transform ${
-                    fogEnabled ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
+          <div className="flex flex-col flex-1 min-h-0 gap-2">
+            {/* 大气雾效 */}
+            <div className="shrink-0 p-2.5 rounded-lg border border-gray-700/80 bg-gray-800/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <Typography.Text className="text-xs text-gray-300">大气雾效</Typography.Text>
+                <Switch size="small" checked={fogEnabled} onChange={setFogEnabled} />
+              </div>
+              {fogEnabled && (
+                <div className="space-y-2 pt-1 border-t border-gray-700/60">
+                  <div>
+                    <Typography.Text className="text-[10px] text-gray-500 block mb-1">雾颜色</Typography.Text>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={fogColor}
+                        onChange={(e) => setFogColor(e.target.value)}
+                        className="w-8 h-7 rounded cursor-pointer border border-gray-600"
+                      />
+                      <input
+                        type="text"
+                        value={fogColor}
+                        onChange={(e) => setFogColor(e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Typography.Text className="text-[10px] text-gray-500 block mb-1">近处: {fogNear}</Typography.Text>
+                    <input
+                      type="range"
+                      min="0"
+                      max="50"
+                      step="1"
+                      value={fogNear}
+                      onChange={(e) => setFogNear(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <Typography.Text className="text-[10px] text-gray-500 block mb-1">远处: {fogFar}</Typography.Text>
+                    <input
+                      type="range"
+                      min="10"
+                      max="200"
+                      step="1"
+                      value={fogFar}
+                      onChange={(e) => setFogFar(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {fogEnabled && (
-              <>
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-2">雾颜色</h4>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={fogColor}
-                      onChange={(e) => setFogColor(e.target.value)}
-                      className="w-12 h-10 rounded cursor-pointer border border-gray-600"
-                    />
-                    <input
-                      type="text"
-                      value={fogColor}
-                      onChange={(e) => setFogColor(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-1">
-                    近处距离: {fogNear}
-                  </h4>
-                  <input
-                    type="range"
-                    min="0"
-                    max="50"
-                    step="1"
-                    value={fogNear}
-                    onChange={(e) => setFogNear(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-1">
-                    远处距离: {fogFar}
-                  </h4>
-                  <input
-                    type="range"
-                    min="10"
-                    max="200"
-                    step="1"
-                    value={fogFar}
-                    onChange={(e) => setFogFar(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-              </>
-            )}
-
-            <div>
-              <h4 className="text-xs font-medium text-gray-300 mb-3">HDR环境贴图</h4>
-              
-              {/* HDR背景 */}
-              <div className={`mb-3 p-3 rounded-lg border transition-all ${
-                hasHDRBackground 
-                  ? 'bg-blue-900/20 border-blue-500/50' 
-                  : 'bg-gray-800/50 border-gray-700'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      hasHDRBackground ? 'bg-blue-400 animate-pulse' : 'bg-gray-600'
-                    }`} />
-                    <span className="text-xs font-medium text-gray-300">HDR背景</span>
-                  </div>
-                  {hasHDRBackground && (
-                    <span className="text-[10px] text-blue-400 truncate max-w-[120px]" title={hdrBgName}>
-                      {hdrBgName}
-                    </span>
-                  )}
-                </div>
-                
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => hdrBgFileRef.current?.click()}
-                    className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
-                      hasHDRBackground
-                        ? 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/30'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    {hasHDRBackground ? '🔄 更换HDR' : '📁 加载HDR背景'}
-                  </button>
-                  {hasHDRBackground && (
-                    <button 
-                      onClick={handleClearBackground}
-                      className="px-3 py-2 bg-red-600/80 text-white rounded hover:bg-red-700 transition-colors text-xs"
-                      title="清除HDR背景，恢复纯色背景"
-                    >
-                      🗑️
-                    </button>
-                  )}
-                </div>
-                <input 
-                  ref={hdrBgFileRef}
-                  type="file"
-                  accept=".hdr,.exr"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleLoadHDR(file, true);
-                  }}
-                />
-              </div>
-
-              {/* HDR环境 */}
-              <div className={`p-3 rounded-lg border transition-all ${
-                hasHDREnvironment 
-                  ? 'bg-purple-900/20 border-purple-500/50' 
-                  : 'bg-gray-800/50 border-gray-700'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      hasHDREnvironment ? 'bg-purple-400 animate-pulse' : 'bg-gray-600'
-                    }`} />
-                    <span className="text-xs font-medium text-gray-300">HDR环境</span>
-                  </div>
-                  {hasHDREnvironment && (
-                    <span className="text-[10px] text-purple-400 truncate max-w-[120px]" title={hdrEnvName}>
-                      {hdrEnvName}
-                    </span>
-                  )}
-                </div>
-                
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => hdrEnvFileRef.current?.click()}
-                    className={`flex-1 px-3 py-2 rounded text-xs transition-all ${
-                      hasHDREnvironment
-                        ? 'bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30'
-                        : 'bg-purple-600 text-white hover:bg-purple-700'
-                    }`}
-                  >
-                    {hasHDREnvironment ? '🔄 更换HDR' : '🌍 加载HDR环境'}
-                  </button>
-                  {hasHDREnvironment && (
-                    <button 
-                      onClick={handleClearEnvironment}
-                      className="px-3 py-2 bg-red-600/80 text-white rounded hover:bg-red-700 transition-colors text-xs"
-                      title="清除HDR环境贴图"
-                    >
-                      🗑️
-                    </button>
-                  )}
-                </div>
-                <input 
-                  ref={hdrEnvFileRef}
-                  type="file"
-                  accept=".hdr,.exr"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleLoadHDR(file, false);
-                  }}
-                />
-              </div>
-              
-              {/* 提示信息 */}
-              <div className="mt-3 p-2 bg-gray-800/50 rounded text-[10px] text-gray-500">
-                <div>💡 HDR背景：替换场景背景色</div>
-                <div>🌍 HDR环境：提供真实光照和反射</div>
-                <div>⚡ 两者可同时启用，也可单独使用</div>
-              </div>
+            {/* 环境贴图强度 */}
+            <div className="shrink-0 p-2.5 rounded-lg border border-gray-700/80 bg-gray-800/40">
+              <Typography.Text className="text-[10px] text-gray-500 block mb-1">
+                环境反射强度: {envMapIntensity.toFixed(1)}
+              </Typography.Text>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="0.1"
+                value={envMapIntensity}
+                disabled={!envHdriEnabled || !hasHDREnvironment}
+                onChange={(e) => setEnvMapIntensity(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              />
+              <Typography.Text type="secondary" className="text-[10px] block mt-1 leading-relaxed">
+                调节 PBR 材质的环境光与反射；需开启「环境光照」且模型为标准/物理材质。
+              </Typography.Text>
             </div>
-          </>
+
+            {/* HDRI */}
+            <EnvironmentHdriSection
+              hdriReady={hdriReady}
+              envHdriEnabled={envHdriEnabled}
+              bgHdriEnabled={bgHdriEnabled}
+              hdrBgName={hdrBgName}
+              hdrEnvName={hdrEnvName}
+              hasHDRBackground={hasHDRBackground}
+              hasHDREnvironment={hasHDREnvironment}
+              selectedHdriId={selectedHdriId}
+              loadingHdriId={loadingHdriId}
+              hdriResolution={hdriResolution}
+              onResolutionChange={setHdriResolution}
+              onPolyhavenSelect={handlePolyhavenSelect}
+              onToggleEnv={toggleEnvHdri}
+              onToggleBg={toggleBgHdri}
+              onLoadLocalHdr={handleLoadHDR}
+              onClearBackground={handleClearBackground}
+              onClearEnvironment={handleClearEnvironment}
+              canDownloadHdr={hdriReady && !!(hasHDRBackground || hasHDREnvironment)}
+              downloadingHdr={downloadingHdr}
+              onDownloadHdr={handleDownloadCurrentHdr}
+            />
+          </div>
         )}
 
         {/* 渲染设置 */}
@@ -999,24 +1042,6 @@ export function GlobalSettings() {
             </div>
 
             <div>
-              <h4 className="text-xs font-medium text-gray-300 mb-2">环境贴图强度</h4>
-              <div>
-                <label className="text-xs text-gray-400 block mb-1">
-                  强度: {envMapIntensity.toFixed(1)}
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="5"
-                  step="0.1"
-                  value={envMapIntensity}
-                  onChange={(e) => setEnvMapIntensity(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                />
-              </div>
-            </div>
-
-            <div>
               <h4 className="text-xs font-medium text-gray-300 mb-2">像素比</h4>
               <select 
                 value={pixelRatio}
@@ -1034,195 +1059,7 @@ export function GlobalSettings() {
 
         {/* 后期处理设置 */}
         {activeTab === 'postprocess' && (
-          <>
-            {/* 后期处理总开关 */}
-            <div className="mb-4 p-3 bg-gray-800 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-white">启用后期处理</span>
-                <button
-                  onClick={() => setPostProcessEnabled(!postProcessEnabled)}
-                  className={`w-12 h-6 rounded-full transition-colors ${
-                    postProcessEnabled ? 'bg-blue-500' : 'bg-gray-600'
-                  }`}
-                >
-                  <div
-                    className={`w-5 h-5 bg-white rounded-full transform transition-transform ${
-                      postProcessEnabled ? 'translate-x-6' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {postProcessEnabled && (
-              <>
-                {/* 后期效果选择 */}
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-white mb-2">选择效果</h3>
-                  <select 
-                    value={selectedEffect}
-                    onChange={(e) => setSelectedEffect(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-gray-700 text-white border border-gray-600 rounded focus:border-blue-500 focus:outline-none"
-                  >
-                    <option value="none">无</option>
-                    <option value="bloom">泛光/辉光 (Bloom)</option>
-                    <option value="fxaa">快速抗锯齿 (FXAA)</option>
-                    <option value="sobel">边缘检测 (Sobel)</option>
-                    <option value="chromatic">色差效果 (Chromatic Aberration)</option>
-                    <option value="pixelate">像素化 (Pixelation)</option>
-                    <option value="vignette">暗角 (Vignette)</option>
-                    <option value="film">胶片颗粒 (Film)</option>
-                    <option value="glitch">故障艺术 (Glitch)</option>
-                    <option value="outline">轮廓描边 (Outline)</option>
-                    <option value="bokeh">景深模糊 (Bokeh)</option>
-                    <option value="afterimage">残影拖尾 (Afterimage)</option>
-                    <option value="halftone">半调网点 (Halftone)</option>
-                    <option value="dotscreen">点阵屏幕 (Dot Screen)</option>
-                    <option value="sao">环境光遮蔽 (SAO)</option>
-                    <option value="ssao">屏幕空间环境光遮蔽 (SSAO)</option>
-                    <option value="pixelated">像素化渲染 (Pixelated)</option>
-                  </select>
-                </div>
-
-                {/* 泛光参数 */}
-                {selectedEffect === 'bloom' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">泛光参数</h4>
-                    
-                    <div className="mb-3">
-                      <label className="text-xs text-gray-400 block mb-1">
-                        强度: {bloomIntensity.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="3"
-                        step="0.05"
-                        value={bloomIntensity}
-                        onChange={(e) => setBloomIntensity(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="mb-3">
-                      <label className="text-xs text-gray-400 block mb-1">
-                        半径: {bloomRadius.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={bloomRadius}
-                        onChange={(e) => setBloomRadius(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">
-                        阈值: {bloomThreshold.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={bloomThreshold}
-                        onChange={(e) => setBloomThreshold(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* 暗角参数 */}
-                {selectedEffect === 'vignette' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">暗角参数</h4>
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">
-                        暗度: {vignetteDarkness.toFixed(2)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={vignetteDarkness}
-                        onChange={(e) => setVignetteDarkness(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* FXAA参数 */}
-                {selectedEffect === 'fxaa' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">FXAA参数</h4>
-                    <div className="text-xs text-gray-400">
-                      <p>• 快速近似抗锯齿</p>
-                      <p>• 性能优异,适合实时渲染</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Sobel参数 */}
-                {selectedEffect === 'sobel' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">Sobel参数</h4>
-                    <div className="text-xs text-gray-400">
-                      <p>• 边缘检测效果</p>
-                      <p>• 可用于艺术风格渲染</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* 色差参数 */}
-                {selectedEffect === 'chromatic' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">色差参数</h4>
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">
-                        色差强度: {chromaticAmount.toFixed(3)}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="0.01"
-                        step="0.001"
-                        value={chromaticAmount}
-                        onChange={(e) => setChromaticAmount(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* 像素化参数 */}
-                {selectedEffect === 'pixelate' && (
-                  <div className="mb-4">
-                    <h4 className="text-xs font-medium text-gray-300 mb-3">像素化参数</h4>
-                    <div>
-                      <label className="text-xs text-gray-400 block mb-1">
-                        像素大小: {pixelSize.toFixed(1)}
-                      </label>
-                      <input
-                        type="range"
-                        min="1"
-                        max="20"
-                        step="0.5"
-                        value={pixelSize}
-                        onChange={(e) => setPixelSize(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </>
+          <PostProcessSettings />
         )}
       </div>
     </div>

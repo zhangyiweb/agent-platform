@@ -1,9 +1,6 @@
 import { useState, useRef } from 'react';
-import { useSceneStore } from '@/store/sceneStore';
-import { useSceneExporter } from '@/hooks/useSceneExporter';
 import { useModelLoader } from '@/hooks/useModelLoader';
 import { ExportPanel } from '@/components/Panels/ExportPanel';
-import * as THREE from 'three';
 
 export function Toolbar() {
   const [showExport, setShowExport] = useState(false);

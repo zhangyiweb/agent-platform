@@ -52,13 +52,15 @@ export function ComponentLibrary() {
         color: '#ffffff',
         intensity: 0.5,
         groundColor: '#444444',
+        position: [0, 10, 0],
       },
     };
 
-    const lightId = `light_${Date.now()}`;
-    addLight({ ...lightConfigs[type], id: lightId });
-    
-    // 自动选中新添加的灯光
+    const lightId = addLight({
+      ...lightConfigs[type],
+      enabled: true,
+    });
+
     selectLight(lightId);
   };
 
@@ -143,7 +145,9 @@ export function ComponentLibrary() {
     });
 
     const mesh = new THREE.Mesh(geometry, material);
+    const id = `geometry_${Date.now()}`;
     mesh.name = name;
+    mesh.userData.id = id;
     mesh.position.set(0, 0.5, 0);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -153,8 +157,6 @@ export function ComponentLibrary() {
     if (scene) {
       scene.add(mesh);
       
-      // 注册到store
-      const id = `geometry_${Date.now()}`;
       addSceneObject({
         id,
         name: name,

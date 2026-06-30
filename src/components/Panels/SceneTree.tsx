@@ -1,358 +1,368 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSceneStore } from '@/store/sceneStore';
 import { useLightStore } from '@/store/lightStore';
-import { SearchOutlined, DownOutlined, RightOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  SearchOutlined,
+  DownOutlined,
+  RightOutlined,
+  DeleteOutlined,
+  BulbOutlined,
+  BoxPlotOutlined,
+  AppstoreOutlined,
+  BlockOutlined,
+} from '@ant-design/icons';
+import { findThreeObjectById } from '@/utils/sceneUtils';
 import * as THREE from 'three';
 
-// 树节点数据结构
 interface TreeNode {
+  key: string;
   id: string;
-  uuid: string; // Three.js对象的uuid
+  uuid: string;
   name: string;
   type: 'model' | 'group' | 'mesh' | 'light';
-  icon: string;
   children: TreeNode[];
-  hasChildren: boolean;
 }
 
-// 递归树节点组件
-function TreeNodeItem({ node, depth = 0, onDelete }: { node: TreeNode; depth?: number; onDelete: (id: string, type: 'model' | 'light') => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const { selectedIds, selectObject, getThreeObject } = useSceneStore();
-  const { selectedLightId, selectLight } = useLightStore();
-  const { deselectAll } = useSceneStore();
+function isHelperObject(obj: THREE.Object3D): boolean {
+  return (
+    obj.name === 'grid' ||
+    obj.name === 'axes' ||
+    obj.name.startsWith('helper_') ||
+    obj.userData?.isLightPickProxy === true ||
+    obj.type === 'TransformControlsGizmo' ||
+    (obj.children.length === 2 && obj.children[0]?.type === 'TransformControlsGizmo') ||
+    obj instanceof THREE.Light
+  );
+}
 
-  const isSelected = node.type === 'light'
-    ? selectedLightId === node.id
-    : selectedIds.includes(node.uuid) || selectedIds.includes(node.id);
+function TreeNodeItem({
+  node,
+  depth,
+  expandedKeys,
+  onToggleExpand,
+  isNodeSelected,
+  onSelect,
+  onDelete,
+}: {
+  node: TreeNode;
+  depth: number;
+  expandedKeys: Set<string>;
+  onToggleExpand: (key: string) => void;
+  isNodeSelected: (node: TreeNode) => boolean;
+  onSelect: (node: TreeNode) => void;
+  onDelete: (node: TreeNode) => void;
+}) {
+  const expanded = expandedKeys.has(node.key);
+  const hasChildren = node.children.length > 0;
+  const selected = isNodeSelected(node);
 
-  const handleClick = () => {
-    if (node.type === 'light') {
-      selectLight(node.id);
-      deselectAll();
-      const transformControls = (window as any).__editorTransformControls;
-      if (transformControls) {
-        transformControls.detach();
-      }
-    } else {
-      // 对于mesh和group,使用uuid作为id
-      const selectId = node.uuid || node.id;
-      selectObject(selectId);
-      selectLight(null);
-      
-      // 直接从场景中查找Three.js对象
-      const scene = (window as any).__editorScene;
-      if (scene) {
-        let threeObj: THREE.Object3D | null = null;
-        scene.traverse((child: THREE.Object3D) => {
-          if (child.uuid === node.uuid) {
-            threeObj = child;
-          }
-        });
-        
-        if (threeObj) {
-          const transformControls = (window as any).__editorTransformControls;
-          if (transformControls) {
-            transformControls.attach(threeObj);
-          }
-        }
-      }
-    }
-  };
-
-  const toggleExpand = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpanded(!expanded);
-  };
-
-  const iconMap: Record<string, string> = {
-    model: '📦',
-    group: '📁',
-    mesh: '🔷',
-    light: '💡',
-  };
+  const icon =
+    node.type === 'light' ? (
+      <BulbOutlined className="text-yellow-400 scene-tree-icon" />
+    ) : node.type === 'mesh' ? (
+      <BlockOutlined className="text-blue-400 scene-tree-icon" />
+    ) : node.type === 'group' ? (
+      <AppstoreOutlined className="text-gray-400 scene-tree-icon" />
+    ) : (
+      <BoxPlotOutlined className="text-indigo-400 scene-tree-icon" />
+    );
 
   return (
     <div>
       <div
-        onClick={handleClick}
-        className={`group flex items-center py-1.5 cursor-pointer transition-all hover:bg-gray-800 ${
-          isSelected ? 'bg-blue-900/40' : ''
+        onClick={() => onSelect(node)}
+        className={`group scene-tree-row flex items-center gap-1 min-h-[26px] py-0.5 cursor-pointer transition-colors hover:bg-gray-800/80 ${
+          selected ? 'bg-blue-600/25 border-l-2 border-blue-500' : 'border-l-2 border-transparent'
         }`}
-        style={{ paddingLeft: `${depth * 16 + 12}px` }}
+        style={{ paddingLeft: `${depth * 14 + 8}px` }}
       >
-        {/* 展开/折叠按钮 */}
         <button
-          onClick={toggleExpand}
-          className="w-4 h-4 flex items-center justify-center mr-1 text-gray-500 hover:text-white"
-          style={{ visibility: node.hasChildren ? 'visible' : 'hidden' }}
-        >
-          {expanded ? <DownOutlined style={{ fontSize: 10 }} /> : <RightOutlined style={{ fontSize: 10 }} />}
-        </button>
-
-        {/* 图标 */}
-        <span className="mr-2 text-sm">{iconMap[node.type] || '📦'}</span>
-        
-        {/* 名称 */}
-        <span className="flex-1 text-white text-xs truncate">{node.name || '未命名'}</span>
-        
-        {/* 删除按钮 */}
-        <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onDelete(node.id, node.type === 'light' ? 'light' : 'model');
+            if (hasChildren) onToggleExpand(node.key);
           }}
-          className="ml-2 p-1 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-all opacity-0 group-hover:opacity-100"
+          className="scene-tree-chevron w-4 h-4 inline-flex items-center justify-center shrink-0 text-gray-500 hover:text-white"
+          style={{ visibility: hasChildren ? 'visible' : 'hidden' }}
+        >
+          {expanded ? <DownOutlined /> : <RightOutlined />}
+        </button>
+
+        <span className="scene-tree-icon-wrap inline-flex items-center justify-center shrink-0">
+          {icon}
+        </span>
+        <span className="scene-tree-label flex-1 text-white text-xs truncate">
+          {node.name || '未命名'}
+        </span>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(node);
+          }}
+          className="scene-tree-delete mr-2 inline-flex items-center justify-center w-5 h-5 text-gray-600 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
           title="删除"
         >
-          <DeleteOutlined style={{ fontSize: 12 }} />
+          <DeleteOutlined />
         </button>
       </div>
 
-      {/* 子节点 */}
-      {expanded && node.children.map((child) => (
-        <TreeNodeItem key={child.uuid} node={child} depth={depth + 1} onDelete={onDelete} />
-      ))}
+      {expanded &&
+        node.children.map((child) => (
+          <TreeNodeItem
+            key={child.key}
+            node={child}
+            depth={depth + 1}
+            expandedKeys={expandedKeys}
+            onToggleExpand={onToggleExpand}
+            isNodeSelected={isNodeSelected}
+            onSelect={onSelect}
+            onDelete={onDelete}
+          />
+        ))}
     </div>
   );
 }
 
 export function SceneTree() {
-  const { objects, selectedIds, selectObject, removeObject, getThreeObject, deselectAll } = useSceneStore();
+  const { objects, selectedIds, selectObject, removeObject, getThreeObject, deselectAll, registerThreeObject } =
+    useSceneStore();
   const { lights, selectedLightId, selectLight, removeLight } = useLightStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
-  // 构建场景树 - 从 Three.js 场景中读取完整层级结构
+  const buildTreeNode = useCallback(
+    (obj: THREE.Object3D, term: string): TreeNode | null => {
+      const name = obj.name || '';
+      const nameMatch = !term || name.toLowerCase().includes(term.toLowerCase());
+
+      const children: TreeNode[] = [];
+      obj.children.forEach((child) => {
+        if (isHelperObject(child)) return;
+        const childNode = buildTreeNode(child, term);
+        if (childNode) children.push(childNode);
+      });
+
+      const childMatch = children.length > 0;
+      if (!nameMatch && !childMatch) return null;
+
+      const id = obj.userData?.id || obj.userData?.businessId || obj.uuid;
+      if (!obj.userData?.businessId) {
+        obj.userData = obj.userData || {};
+        obj.userData.businessId = obj.uuid;
+      }
+
+      // 根级导入模型注册到 store 映射
+      if (obj.userData?.id && !getThreeObject(obj.userData.id)) {
+        registerThreeObject(obj.userData.id, obj);
+      }
+
+      let type: TreeNode['type'] = 'group';
+      if (obj instanceof THREE.Mesh) type = 'mesh';
+      else if (obj.children.length > 0) type = 'group';
+      else type = 'model';
+
+      return {
+        key: `obj-${obj.uuid}`,
+        id,
+        uuid: obj.uuid,
+        name: name || (type === 'mesh' ? 'Mesh' : 'Group'),
+        type,
+        children,
+      };
+    },
+    [getThreeObject, registerThreeObject]
+  );
+
   const buildSceneTree = useCallback(() => {
-    const scene = (window as any).__editorScene;
+    const scene = (window as any).__editorScene as THREE.Scene | undefined;
     if (!scene) return;
 
     const nodes: TreeNode[] = [];
+    const term = searchTerm.trim().toLowerCase();
 
-    // 添加灯光
-    lights.forEach(light => {
-      if (!searchTerm || light.name.toLowerCase().includes(searchTerm.toLowerCase())) {
+    lights.forEach((light) => {
+      if (!term || light.name.toLowerCase().includes(term)) {
         nodes.push({
+          key: `light-${light.id}`,
           id: light.id,
           uuid: '',
           name: light.name,
           type: 'light',
-          icon: '💡',
           children: [],
-          hasChildren: false,
         });
       }
     });
 
-    // 遍历场景对象,构建树形结构 - 只显示顶级对象及其子树
-    scene.children.forEach((child: THREE.Object3D) => {
-      // 跳过辅助对象、默认灯光和系统对象
-      if (child.name === 'grid' || 
-          child.name === 'axes' || 
-          child.name.startsWith('helper_') ||
-          child.userData?.id === 'light_ambient_default' ||
-          child.userData?.id === 'light_directional_default' ||
-          child.type === 'TransformControlsGizmo' ||
-          (child.children.length === 2 && child.children[0]?.type === 'TransformControlsGizmo') ||
-          child.type === 'DataTexture' || // HDR环境贴图
-          child.type === 'Texture') { // 背景贴图
-        return;
-      }
-
-      // 构建完整的树形结构(包括根节点和所有子节点)
-      const rootNode = buildTreeNode(child, searchTerm);
-      if (rootNode) {
-        nodes.push(rootNode);
-      }
+    scene.children.forEach((child) => {
+      if (isHelperObject(child)) return;
+      const rootNode = buildTreeNode(child, term);
+      if (rootNode) nodes.push(rootNode);
     });
 
     setTreeData(nodes);
-  }, [lights, searchTerm]);
+  }, [lights, searchTerm, buildTreeNode]);
 
-  // 递归构建节点树
-  const buildTreeNode = (obj: THREE.Object3D, searchTerm: string): TreeNode | null => {
-    // 搜索过滤
-    if (searchTerm && !obj.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-      // 检查子节点是否有匹配的
-      let hasMatch = false;
-      obj.traverse((child) => {
-        if (child.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-          hasMatch = true;
-        }
-      });
-      if (!hasMatch) return null;
-    }
-
-    const children: TreeNode[] = [];
-    let hasChildren = false;
-
-    // 处理子节点
-    obj.children.forEach((child) => {
-      if (child.name === 'grid' || child.name === 'axes' || child.name.startsWith('helper_')) {
-        return;
-      }
-
-      const childNode = buildTreeNode(child, searchTerm);
-      if (childNode) {
-        children.push(childNode);
-        hasChildren = true;
-      }
-    });
-
-    // 确定类型和图标
-    let type: 'model' | 'group' | 'mesh' = 'group';
-    if (obj instanceof THREE.Mesh) {
-      type = 'mesh';
-    } else if (obj.children.length > 0) {
-      type = 'group';
-    } else {
-      type = 'model';
-    }
-
-    // 生成ID (对于子mesh,使用uuid作为id)
-    const id = obj.userData?.businessId || obj.uuid;
-
-    // 注册Three.js对象映射(用于子mesh选择)
-    if (!obj.userData?.businessId) {
-      obj.userData = obj.userData || {};
-      obj.userData.businessId = obj.uuid;
-    }
-
-    return {
-      id,
-      uuid: obj.uuid,
-      name: obj.name || (type === 'mesh' ? 'Mesh' : 'Group'),
-      type,
-      icon: type === 'mesh' ? '🔷' : (type === 'group' ? '📁' : '📦'),
-      children,
-      hasChildren,
-    };
-  };
-
-  // 监听场景变化,重建树形结构
   useEffect(() => {
     buildSceneTree();
-    const interval = setInterval(buildSceneTree, 500); // 每0.5秒更新一次,减少延迟
+    const interval = setInterval(buildSceneTree, 800);
     return () => clearInterval(interval);
   }, [buildSceneTree]);
 
-  // 处理对象选择 (区分模型和灯光)
-  const handleObjectSelect = (obj: typeof treeData[0]) => {
-    if (obj.type === 'light') {
-      selectLight(obj.id);
-      deselectAll();
-      
-      // 灯光不需要TransformControls
-      const transformControls = (window as any).__editorTransformControls;
-      if (transformControls) {
-        transformControls.detach();
-      }
-    } else {
-      selectObject(obj.id);
-      selectLight(null);
-      
-      // 获取Three.js对象并附加TransformControls
-      const threeObj = getThreeObject(obj.uuid);
-      if (threeObj) {
-        const transformControls = (window as any).__editorTransformControls;
-        if (transformControls) {
-          transformControls.attach(threeObj);
-        }
-      }
-    }
-  };
+  const isNodeSelected = useCallback(
+    (node: TreeNode) => {
+      if (node.type === 'light') return selectedLightId === node.id;
+      return selectedIds.includes(node.id) || selectedIds.includes(node.uuid);
+    },
+    [selectedIds, selectedLightId]
+  );
 
-  // 删除对象
-  const handleDelete = (id: string, type: 'model' | 'light') => {
-    if (type === 'light') {
-      // 取消选择(如果有)
-      if (selectedLightId === id) {
-        selectLight(null);
+  // 选中时自动展开父级
+  useEffect(() => {
+    const keysToExpand = new Set<string>();
+
+    const walk = (nodes: TreeNode[], ancestors: string[]) => {
+      for (const node of nodes) {
+        const path = [...ancestors, node.key];
+        if (isNodeSelected(node)) {
+          ancestors.forEach((k) => keysToExpand.add(k));
+        }
+        if (node.children.length) walk(node.children, path);
       }
-      
-      // 删除灯光
-      removeLight(id);
-      
-      // 从场景中移除灯光对象
-      const scene = (window as any).__editorScene;
-      if (scene && scene.traverse) {
-        const toRemove: THREE.Object3D[] = [];
-        scene.traverse((child: THREE.Object3D) => {
-          if (child.userData?.id === id) {
-            toRemove.push(child);
-          }
-        });
-        toRemove.forEach(child => scene.remove(child));
-      }
-    } else {
-      // 删除模型或子mesh
-      const scene = (window as any).__editorScene;
-      if (!scene || !scene.traverse) {
+    };
+    walk(treeData, []);
+
+    if (keysToExpand.size > 0) {
+      setExpandedKeys((prev) => new Set([...prev, ...keysToExpand]));
+    }
+  }, [selectedIds, selectedLightId, treeData, isNodeSelected]);
+
+  const handleSelect = useCallback(
+    (node: TreeNode) => {
+      const scene = (window as any).__editorScene as THREE.Scene | undefined;
+      const transformControls = (window as any).__editorTransformControls;
+
+      if (node.type === 'light') {
+        selectLight(node.id);
+        deselectAll();
         return;
       }
-      
-      // 通过uuid查找对象
-      let targetObj: THREE.Object3D | null = null;
-      scene.traverse((child: THREE.Object3D) => {
-        if (child.uuid === id) {
-          targetObj = child;
-        }
-      });
-      
-      if (targetObj) {
-        // 先detach TransformControls(重要!)
-        const transformControls = (window as any).__editorTransformControls;
-        if (transformControls && transformControls.object === targetObj) {
+
+      selectObject(node.id);
+      selectLight(null);
+
+      if (scene && transformControls) {
+        const threeObj = findThreeObjectById(scene, node.id, getThreeObject);
+        if (threeObj) {
+          transformControls.attach(threeObj);
+        } else {
           transformControls.detach();
         }
-        
-        // 取消选择(如果删除的是当前选中的对象)
-        if (selectedIds.includes(id)) {
-          deselectAll();
-        }
-        
-        // 从场景移除
-        scene.remove(targetObj);
-        
-        // 从store中移除
-        removeObject(id);
       }
-    }
-  };
+    },
+    [selectObject, selectLight, deselectAll, getThreeObject]
+  );
+
+  const handleDelete = useCallback(
+    (node: TreeNode) => {
+      if (node.type === 'light') {
+        if (selectedLightId === node.id) selectLight(null);
+        removeLight(node.id);
+        const scene = (window as any).__editorScene as THREE.Scene | undefined;
+        if (scene) {
+          const toRemove: THREE.Object3D[] = [];
+          scene.traverse((child) => {
+            if (child.userData?.id === node.id) toRemove.push(child);
+          });
+          toRemove.forEach((c) => scene.remove(c));
+        }
+        return;
+      }
+
+      const scene = (window as any).__editorScene as THREE.Scene | undefined;
+      if (!scene) return;
+
+      const targetObj = findThreeObjectById(scene, node.id, getThreeObject);
+      if (!targetObj) return;
+
+      const transformControls = (window as any).__editorTransformControls;
+      if (transformControls?.object === targetObj) transformControls.detach();
+
+      if (selectedIds.includes(node.id) || selectedIds.includes(node.uuid)) {
+        deselectAll();
+      }
+
+      targetObj.parent?.remove(targetObj);
+
+      const storeId = objects.find((o) => o.id === node.id || o.id === targetObj.uuid)?.id;
+      if (storeId) removeObject(storeId);
+    },
+    [selectedLightId, selectedIds, selectLight, removeLight, getThreeObject, deselectAll, objects, removeObject]
+  );
+
+  const toggleExpand = useCallback((key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const objectCount = useMemo(() => {
+    let count = 0;
+    const countNodes = (nodes: TreeNode[]) => {
+      nodes.forEach((n) => {
+        if (n.type !== 'light') count++;
+        countNodes(n.children);
+      });
+    };
+    countNodes(treeData);
+    return count + lights.length;
+  }, [treeData, lights]);
 
   return (
     <div className="h-full flex flex-col bg-gray-900">
-      {/* 搜索框 */}
-      <div className="p-3 border-b border-gray-700">
-        <div className="flex items-center bg-gray-800 rounded px-2 py-1.5">
-          <SearchOutlined className="text-gray-400 text-xs" />
+      <div className="px-2 py-2 border-b border-gray-700 shrink-0">
+        <div className="scene-tree-search flex items-center gap-1.5 bg-gray-800 rounded px-2 py-1.5">
+          <span className="scene-tree-icon-wrap inline-flex items-center justify-center shrink-0 text-gray-500">
+            <SearchOutlined />
+          </span>
           <input
             type="text"
-            placeholder="搜索场景对象..."
+            placeholder="搜索对象..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 ml-2 bg-transparent text-white text-xs placeholder-gray-500 focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent text-white text-xs leading-4 placeholder-gray-500 focus:outline-none"
           />
         </div>
       </div>
 
-      {/* 场景树列表 */}
-      <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(50vh - 100px)' }}>
+      <div className="flex-1 overflow-y-auto min-h-0">
         {treeData.length === 0 ? (
-          <div className="p-8 text-center text-gray-500 text-xs">
-            {searchTerm ? '未找到匹配的对象' : '场景为空'}
+          <div className="p-6 text-center text-gray-500 text-xs">
+            {searchTerm ? '未找到匹配对象' : '场景为空'}
           </div>
         ) : (
           treeData.map((node) => (
-            <TreeNodeItem key={node.uuid} node={node} onDelete={handleDelete} />
+            <TreeNodeItem
+              key={node.key}
+              node={node}
+              depth={0}
+              expandedKeys={expandedKeys}
+              onToggleExpand={toggleExpand}
+              isNodeSelected={isNodeSelected}
+              onSelect={handleSelect}
+              onDelete={handleDelete}
+            />
           ))
         )}
       </div>
 
-      {/* 底部统计 */}
-      <div className="p-2 border-t border-gray-700 text-xs text-gray-500 text-center">
-        {treeData.length} 个对象
+      <div className="px-2 py-1 border-t border-gray-700 text-[10px] text-gray-500 text-center shrink-0">
+        {objectCount} 个对象
       </div>
     </div>
   );

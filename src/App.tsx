@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSceneStore } from '@/store/sceneStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useLightStore } from '@/store/lightStore'
@@ -7,7 +7,6 @@ import { EditorViewport } from '@/components/Viewport/EditorViewport'
 import { SceneTree } from '@/components/Panels/SceneTree'
 import { ComponentLibrary } from '@/components/Panels/ComponentLibrary'
 import { PropertyPanel } from '@/components/Panels/PropertyPanel'
-import { ExportPanel } from '@/components/Panels/ExportPanel'
 import { Toolbar } from '@/components/Toolbar/MainToolbar'
 import { GizmoToolbar } from '@/components/Toolbar/GizmoToolbar'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -55,8 +54,7 @@ function App() {
       if (child.name === 'grid' || 
           child.name === 'axes' || 
           child.name.startsWith('helper_') ||
-          child.userData?.id === 'light_ambient_default' ||
-          child.userData?.id === 'light_directional_default' ||
+          child instanceof THREE.Light ||
           child.type === 'TransformControlsGizmo' || // TransformControls的gizmo助手
           (child.children.length === 2 && child.children[0]?.type === 'TransformControlsGizmo')) { // 包含gizmo的Object3D
         return;
@@ -116,13 +114,6 @@ function App() {
   const selectedObject = selectedIds.length > 0 
     ? objects.find(obj => obj.id === selectedIds[0])
     : null;
-  
-  // 当前显示的面板 ('scene' 或 'light')
-  const [activePanel, setActivePanel] = useState<'scene' | 'light'>('scene');
-  
-  // 导出面板状态
-  const [showExport, setShowExport] = useState(false);
-  const viewportRef = useRef<{ scene: any; renderer: any } | null>(null);
 
   return (
     <div className="app-container">
@@ -180,15 +171,6 @@ function App() {
 
       {/* Gizmo工具栏 - 固定在屏幕下方 */}
       <GizmoToolbar />
-
-      {/* 导出面板 */}
-      {showExport && (
-        <ExportPanel
-          scene={viewportRef.current?.scene || null}
-          renderer={viewportRef.current?.renderer || null}
-          onClose={() => setShowExport(false)}
-        />
-      )}
     </div>
   )
 }

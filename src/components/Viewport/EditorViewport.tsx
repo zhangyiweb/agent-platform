@@ -1,30 +1,112 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
-import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass';
-import { FXAAShader } from 'three/addons/shaders/FXAAShader';
-import { SobelOperatorShader } from 'three/addons/shaders/SobelOperatorShader';
-import { FilmPass } from 'three/addons/postprocessing/FilmPass';
-import { GlitchPass } from 'three/addons/postprocessing/GlitchPass';
-import { OutlinePass } from 'three/addons/postprocessing/OutlinePass';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass';
-import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass';
-import { HalftonePass } from 'three/addons/postprocessing/HalftonePass';
-import { DotScreenPass } from 'three/addons/postprocessing/DotScreenPass';
-import { SAOPass } from 'three/addons/postprocessing/SAOPass';
-import { SSAOPass } from 'three/addons/postprocessing/SSAOPass';
-import { RenderPixelatedPass } from 'three/addons/postprocessing/RenderPixelatedPass';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+import { SobelOperatorShader } from 'three/addons/shaders/SobelOperatorShader.js';
+import { FilmPass } from 'three/addons/postprocessing/FilmPass.js';
+import { GlitchPass } from 'three/addons/postprocessing/GlitchPass.js';
+import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { HalftonePass } from 'three/addons/postprocessing/HalftonePass.js';
+import { DotScreenPass } from 'three/addons/postprocessing/DotScreenPass.js';
+import { SAOPass } from 'three/addons/postprocessing/SAOPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { RenderPixelatedPass } from 'three/addons/postprocessing/RenderPixelatedPass.js';
 import { useSceneStore } from '@/store/sceneStore';
 import { useEditorStore } from '@/store/editorStore';
 import { useModelLoader } from '@/hooks/useModelLoader';
 import { useLightStore } from '@/store/lightStore';
 import { useHistoryStore } from '@/store/historyStore';
+import {
+  applyRendererLightingDefaults,
+  applyDefaultRoomEnvironment,
+  applyDirectionalShadowSettings,
+  DEFAULT_TONE_MAPPING_EXPOSURE,
+} from '@/config/defaultLighting';
+
+const CLICK_DRAG_THRESHOLD_PX = 5;
+
+/** 从射线命中的 Object3D 向上查找业务 ID */
+function resolveBusinessId(selectedObject: THREE.Object3D): string {
+  let node: THREE.Object3D | null = selectedObject;
+  while (node) {
+    const id = node.userData?.id ?? node.userData?.businessId;
+    if (typeof id === 'string' && id) return id;
+    node = node.parent;
+  }
+
+  const { objects, threeObjects } = useSceneStore.getState();
+  for (const [id, threeObj] of threeObjects) {
+    let matched = false;
+    threeObj.traverse((child) => {
+      if (child === selectedObject) matched = true;
+    });
+    if (matched) return id;
+  }
+
+  const byName = objects.find((obj) => obj.name === selectedObject.name);
+  if (byName) return byName.id;
+
+  return selectedObject.uuid;
+}
+
+/** 是否可用变换控制器移动的灯光 */
+function isTransformableLight(light: THREE.Light): boolean {
+  return !(light instanceof THREE.AmbientLight);
+}
+
+/** 从拾取对象解析灯光 ID */
+function resolveLightIdFromPick(object: THREE.Object3D): string | null {
+  let node: THREE.Object3D | null = object;
+  while (node) {
+    if (typeof node.userData?.lightId === 'string') return node.userData.lightId;
+    if (node.name.startsWith('helper_')) return node.name.slice('helper_'.length);
+    if (node instanceof THREE.Light && typeof node.userData?.id === 'string') return node.userData.id;
+    node = node.parent;
+  }
+  return null;
+}
+
+/** 为可定位灯光添加不可见拾取球，便于视口点击选中 */
+function ensureLightPickProxy(light: THREE.Light, lightId: string) {
+  if (light instanceof THREE.AmbientLight) return;
+  if (light.getObjectByName('light_pick_proxy')) return;
+
+  const proxy = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 10, 10),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+  );
+  proxy.name = 'light_pick_proxy';
+  proxy.userData.lightId = lightId;
+  proxy.userData.isLightPickProxy = true;
+  light.add(proxy);
+}
+
+function createLightHelper(light: THREE.Light): THREE.Object3D | null {
+  switch (light.type) {
+    case 'DirectionalLight':
+      return new THREE.DirectionalLightHelper(light as THREE.DirectionalLight, 5);
+    case 'PointLight':
+      return new THREE.PointLightHelper(light as THREE.PointLight, 0.5);
+    case 'SpotLight':
+      return new THREE.SpotLightHelper(light as THREE.SpotLight);
+    case 'HemisphereLight':
+      return new THREE.HemisphereLightHelper(light as THREE.HemisphereLight, 1);
+    default:
+      return null;
+  }
+}
 
 export function EditorViewport() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,12 +123,14 @@ export function EditorViewport() {
   const currentPassRef = useRef<any>(null); // 当前后期处理Pass
   const currentEffectRef = useRef<string | null>(null); // 当前效果名称
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const pointerDownRef = useRef({ x: 0, y: 0 });
+  const gizmoWasDraggingRef = useRef(false);
 
   const { camera, backgroundColor, objects, selectedIds, selectObject, deselectAll, updateObject, registerThreeObject, addObject } = useSceneStore();
   const { gridVisible, axesVisible, currentTool } = useEditorStore();
   const { handleFileImport } = useModelLoader();
   const { lights } = useLightStore();
-  const { selectedLightId, selectLight } = useLightStore();
+  const { selectedLightId, selectLight, updateLight } = useLightStore();
   const lightsRef = useRef<Map<string, THREE.Light>>(new Map());
   const lightHelpersRef = useRef<Map<string, any>>(new Map());
 
@@ -104,187 +188,182 @@ export function EditorViewport() {
     `,
   };
 
-  // 更新Pass参数
-  const updatePassParams = (pass: any, config: any) => {
-    if (!pass) return;
-    
-    // Bloom参数
+  // 收集场景中可描边的 Mesh（排除辅助对象）
+  const collectOutlineTargets = (scene: THREE.Scene): THREE.Object3D[] => {
+    const targets: THREE.Object3D[] = [];
+    scene.traverse((child) => {
+      if (
+        child instanceof THREE.Mesh &&
+        child.name !== 'grid' &&
+        child.name !== 'axes' &&
+        !child.name.startsWith('helper_')
+      ) {
+        targets.push(child);
+      }
+    });
+    return targets;
+  };
+
+  // 更新 Pass 参数（实时同步 UI）
+  const updatePassParams = (pass: any, config: any, renderer: THREE.WebGLRenderer) => {
+    if (!pass || !config) return;
+
     if (pass.threshold !== undefined && config.bloom) {
       pass.threshold = config.bloom.threshold;
       pass.strength = config.bloom.intensity;
       pass.radius = config.bloom.radius;
     }
-    
-    // FXAA参数
-    if (pass.uniforms?.resolution !== undefined && config.fxaa) {
-      pass.uniforms.resolution.value.x = 1 / (config.fxaa.resolution?.x || 1920);
-      pass.uniforms.resolution.value.y = 1 / (config.fxaa.resolution?.y || 1080);
+
+    if (pass.uniforms?.resolution && pass.material?.fragmentShader?.includes('FXAA')) {
+      const pr = renderer.getPixelRatio();
+      pass.uniforms.resolution.value.set(
+        1 / (renderer.domElement.width * pr),
+        1 / (renderer.domElement.height * pr)
+      );
     }
-    
-    // Sobel参数  
-    if (pass.uniforms?.resolution !== undefined && config.sobel) {
-      pass.uniforms.resolution.value.x = config.sobel.resolution?.x || 1920;
-      pass.uniforms.resolution.value.y = config.sobel.resolution?.y || 1080;
+
+    if (pass.uniforms?.resolution && pass.material?.fragmentShader?.includes('Sobel')) {
+      pass.uniforms.resolution.value.set(renderer.domElement.width, renderer.domElement.height);
     }
-    
-    // 色差参数
-    if (pass.uniforms?.amount !== undefined && config.chromatic) {
+
+    if (pass.uniforms?.amount && config.chromatic) {
       pass.uniforms.amount.value = config.chromatic.amount;
     }
-    
-    // Pixelate参数
-    if (pass.uniforms?.pixelSize !== undefined && config.pixelate) {
+
+    if (pass.uniforms?.pixelSize && config.pixelate) {
       pass.uniforms.pixelSize.value = config.pixelate.size;
+      if (pass.uniforms.resolution) {
+        pass.uniforms.resolution.value.set(renderer.domElement.width, renderer.domElement.height);
+      }
     }
-    
-    // Vignette参数
-    if (pass.uniforms?.darkness !== undefined && config.vignette) {
+
+    if (pass.uniforms?.darkness && config.vignette) {
       pass.uniforms.darkness.value = config.vignette.darkness;
+    }
+
+    if (pass.uniforms?.intensity && config.film) {
+      pass.uniforms.intensity.value = config.film.intensity;
+      pass.uniforms.grayscale.value = config.film.grayscale;
+    }
+
+    if (pass.goWild !== undefined && config.glitch) {
+      pass.goWild = config.glitch.goWild;
+    }
+
+    if (pass.edgeStrength !== undefined && config.outline) {
+      pass.edgeStrength = config.outline.edgeStrength;
+      pass.edgeGlow = config.outline.edgeGlow;
+      pass.edgeThickness = config.outline.edgeThickness;
+      pass.pulsePeriod = config.outline.pulsePeriod;
+    }
+
+    if (pass.uniforms?.focus && config.bokeh) {
+      pass.uniforms.focus.value = config.bokeh.focus;
+      pass.uniforms.aperture.value = config.bokeh.aperture;
+      pass.uniforms.maxblur.value = config.bokeh.maxblur;
+    }
+
+    if (pass.damp !== undefined && config.afterimage) {
+      pass.damp = config.afterimage.damp;
+    }
+
+    if (pass.uniforms?.radius && config.halftone) {
+      pass.uniforms.radius.value = config.halftone.radius;
+      pass.uniforms.scatter.value = config.halftone.scatter;
+      pass.uniforms.blending.value = config.halftone.blending;
+    }
+
+    if (pass.uniforms?.scale && pass.uniforms?.angle && config.dotscreen) {
+      pass.uniforms.scale.value = config.dotscreen.scale;
+      pass.uniforms.angle.value = config.dotscreen.angle;
+    }
+
+    if (pass.params && config.sao) {
+      pass.params.saoBias = config.sao.bias;
+      pass.params.saoIntensity = config.sao.intensity;
+      pass.params.saoScale = config.sao.scale;
+      pass.params.saoKernelRadius = config.sao.kernelRadius;
+    }
+
+    if (pass.kernelRadius !== undefined && config.ssao) {
+      pass.kernelRadius = config.ssao.kernelRadius;
+      pass.minDistance = config.ssao.minDistance;
+      pass.maxDistance = config.ssao.maxDistance;
+    }
+
+    if (pass.pixelSize !== undefined && config.pixelated) {
+      pass.pixelSize = config.pixelated.size;
     }
   };
 
   // 动态重建Renderer - 用于修改antialias/alpha/logarithmicDepthBuffer参数
   const recreateRenderer = useCallback((params: {antialias: boolean, alpha: boolean, logarithmicDepthBuffer: boolean}) => {
     if (!containerRef.current || !sceneRef.current || !cameraRef.current) return;
-    
 
-    
     const oldRenderer = rendererRef.current;
-    const scene = sceneRef.current;
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     const transformControls = transformControlsRef.current;
-    
-    // 保存当前场景中的所有自定义对象(排除网格、坐标轴、灯光、gizmo)
-    const objectsToRestore: THREE.Object3D[] = [];
-    scene.traverse((child) => {
-      if (child.name !== 'grid' && 
-          child.name !== 'axes' && 
-          !(child instanceof THREE.Light) &&
-          child !== transformControls?.getHelper()) {
-        // 检查是否是gizmoHelper的子对象
-        let isGizmo = false;
-        const gizmoHelper = transformControls?.getHelper();
-        if (gizmoHelper) {
-          let current: THREE.Object3D | null = child;
-          while (current) {
-            if (current === gizmoHelper) {
-              isGizmo = true;
-              break;
-            }
-            current = current.parent;
-          }
-        }
-        if (!isGizmo && (child instanceof THREE.Mesh || child instanceof THREE.Group)) {
-          objectsToRestore.push(child);
-        }
-      }
-    });
-    
-    // 移除旧renderer的DOM元素
+
+    // 保留旧 renderer 的运行时设置（重建后恢复）
+    const savedPixelRatio = oldRenderer?.getPixelRatio() ?? Math.min(window.devicePixelRatio, 2);
+    const savedToneMapping = oldRenderer?.toneMapping ?? THREE.ACESFilmicToneMapping;
+    const savedToneMappingExposure = oldRenderer?.toneMappingExposure ?? DEFAULT_TONE_MAPPING_EXPOSURE;
+    const savedUseLegacyLights = (oldRenderer as { useLegacyLights?: boolean } | null)?.useLegacyLights ?? false;
+
+    // 移除旧 renderer 的 DOM
     if (oldRenderer && containerRef.current.contains(oldRenderer.domElement)) {
       containerRef.current.removeChild(oldRenderer.domElement);
       oldRenderer.dispose();
     }
-    
-    // 创建新renderer
+
     const renderer = new THREE.WebGLRenderer({
       antialias: params.antialias,
       alpha: params.alpha,
       logarithmicDepthBuffer: params.logarithmicDepthBuffer,
     });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.setPixelRatio(savedPixelRatio);
+    renderer.toneMapping = savedToneMapping;
+    renderer.toneMappingExposure = savedToneMappingExposure;
+    (renderer as { useLegacyLights?: boolean }).useLegacyLights = savedUseLegacyLights;
+    applyRendererLightingDefaults(renderer, savedToneMappingExposure);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
-    
-    // 更新全局引用
     (window as any).__editorRenderer = renderer;
-    
-    // 重新附加OrbitControls到新的renderer DOM
+
+    // 重绑 OrbitControls（保留 target / 阻尼等内部状态，勿 dispose 后重建）
     if (controls) {
-      controls.dispose();
-      const newControls = new OrbitControls(camera, renderer.domElement);
-      newControls.enableDamping = true;
-      newControls.dampingFactor = 0.05;
-      newControls.update();
-      controlsRef.current = newControls;
-      (window as any).__editorControls = newControls;
-      
-      // 重新添加监听器 - 实时更新相机坐标显示(需要重新实现拖拽检测逻辑)
-      let isOrbitDragging = false;
-      let mouseDownPos = { x: 0, y: 0 };
-      
-      renderer.domElement.addEventListener('mousedown', (e) => {
-        mouseDownPos = { x: e.clientX, y: e.clientY };
-      });
-      
-      newControls.addEventListener('start', () => {
-        isOrbitDragging = false;
-      });
-      
-      renderer.domElement.addEventListener('mousemove', (e) => {
-        const dx = e.clientX - mouseDownPos.x;
-        const dy = e.clientY - mouseDownPos.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance > 5) {
-          isOrbitDragging = true;
-        }
-      });
-      
-      renderer.domElement.addEventListener('mouseup', () => {
-        setTimeout(() => {
-          isOrbitDragging = false;
-        }, 100);
-      });
-      
-      newControls.addEventListener('change', () => {
-        (window as any).__editorCameraPosition = {
-          x: camera.position.x,
-          y: camera.position.y,
-          z: camera.position.z
-        };
-        (window as any).__editorControlsTarget = {
-          x: newControls.target.x,
-          y: newControls.target.y,
-          z: newControls.target.z
-        };
-      });
-      
-      // 将isOrbitDragging暴露给handleClick使用(通过闭包)
-      (window as any).__isOrbitDragging = () => isOrbitDragging;
+      controls.disconnect();
+      controls.connect(renderer.domElement);
     }
-    
-    // 重新附加TransformControls(需要先detach再attach)
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      pointerDownRef.current = { x: e.clientX, y: e.clientY };
+    });
+
+    // 重绑 TransformControls 到新 canvas（保留已 attach 的对象）
     if (transformControls) {
-      transformControls.detach();
-      // TransformControls会自动附加到新的renderer
+      const attachedObject = transformControls.object;
+      transformControls.disconnect();
+      transformControls.connect(renderer.domElement);
+      if (attachedObject) {
+        transformControls.attach(attachedObject);
+      }
       (window as any).__editorTransformControls = transformControls;
     }
-    
-    // 重新加载HDR环境贴图
-    const hdrLoader = new HDRLoader();
-    hdrLoader.load(
-      '/hdr/kloofendal_48d_partly_cloudy_puresky_2k.hdr',
-      (texture: THREE.DataTexture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping;
-        scene.environment = texture;
-      },
-      undefined,
-      (error: unknown) => {
 
-      }
-    );
-    
-    // 注意: 场景中的对象会自动保留,因为它们是scene的子对象,不依赖renderer
-    
-    // 重新绑定所有事件监听器(点击、拖拽导入等)
+    // EffectComposer 绑定旧 renderer，需在下帧由渲染循环重建
+    if (composerRef.current) {
+      composerRef.current.dispose();
+      composerRef.current = null;
+      currentPassRef.current = null;
+    }
+
     const clickHandler = (window as any).__editorClickHandler;
     const dragOverHandler = (window as any).__editorDragOverHandler;
     const dropHandler = (window as any).__editorDropHandler;
-    
+
     if (clickHandler) {
       renderer.domElement.addEventListener('click', clickHandler);
     }
@@ -294,11 +373,6 @@ export function EditorViewport() {
     if (dropHandler) {
       renderer.domElement.addEventListener('drop', dropHandler);
     }
-    
-    // 重要: 需要重新触发useEffect以重新绑定所有事件(点击、拖拽等)
-    // 通过更新renderer的引用,让useEffect检测到变化并重新执行
-    
-
   }, []);
   
   // 将recreateRenderer暴露到全局,供GlobalSettings使用
@@ -343,8 +417,7 @@ export function EditorViewport() {
     });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap; // Three.js 0.184+ 使用PCFShadowMap
+    applyRendererLightingDefaults(renderer, DEFAULT_TONE_MAPPING_EXPOSURE);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -356,41 +429,8 @@ export function EditorViewport() {
     controls.update();
     controlsRef.current = controls;
     
-    // 监听OrbitControls拖拽 - 区分点击和拖拽操作
-    let isOrbitDragging = false;
-    let mouseDownPos = { x: 0, y: 0 };
-    
-    // 使用mousedown记录鼠标按下位置
-    renderer.domElement.addEventListener('mousedown', (e) => {
-      mouseDownPos = { x: e.clientX, y: e.clientY };
-    });
-    
-    controls.addEventListener('start', () => {
-      isOrbitDragging = false; // 先不标记,等判断是否真的移动了
-    });
-    
-    controls.addEventListener('end', () => {
-      // end事件触发时,检查是否真的移动了(不是纯点击)
-      // 这里不立即重置,让click事件能判断
-    });
-    
-    // 监听mousemove,如果移动了就标记为拖拽
-    renderer.domElement.addEventListener('mousemove', (e) => {
-      const dx = e.clientX - mouseDownPos.x;
-      const dy = e.clientY - mouseDownPos.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      // 如果移动距离超过5像素,认为是拖拽而不是点击
-      if (distance > 5) {
-        isOrbitDragging = true;
-      }
-    });
-    
-    // 在mouseup时延迟重置拖拽标志
-    renderer.domElement.addEventListener('mouseup', () => {
-      setTimeout(() => {
-        isOrbitDragging = false;
-      }, 100);
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      pointerDownRef.current = { x: e.clientX, y: e.clientY };
     });
     
     // 监听相机变化 - 实时更新GlobalSettings中的坐标显示
@@ -424,31 +464,9 @@ export function EditorViewport() {
     // 标记场景初始化完成
     (window as any).__sceneInitialized = true;
 
-    // 添加默认灯光 - 环境光 + 方向光
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    ambientLight.userData.id = 'light_ambient_default';
-    scene.add(ambientLight);
-    
-    // 添加默认方向光 - 让使用PBR材质的模型能正常显示
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    directionalLight.position.set(50, 50, 50);
-    directionalLight.userData.id = 'light_directional_default';
-    scene.add(directionalLight);
-    
-    // 加载默认HDR环境贴图 - 从public目录加载
-    const hdrLoader = new HDRLoader();
-    hdrLoader.load(
-      '/hdr/kloofendal_48d_partly_cloudy_puresky_2k.hdr', // public目录下的路径
-      (texture: THREE.DataTexture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping;
-        scene.environment = texture; // 设置为环境贴图,提供真实光照和反射
-        // 不设置background,保持纯色背景,环境贴图只用于光照和反射
-      },
-      undefined,
-      (error: unknown) => {
-
-      }
-    );
+    // ② 默认 IBL：RoomEnvironment
+    applyDefaultRoomEnvironment(renderer, scene);
+    (window as any).__defaultRoomEnvironmentActive = true;
 
     // 添加网格辅助 - 紫色主题,更大更美观
     const gridHelper = new THREE.GridHelper(1000, 50, 0x9333ea, 0x581c87);
@@ -462,7 +480,6 @@ export function EditorViewport() {
 
     // 添加变换控制器 (Gizmo)
     const transformControls = new TransformControls(cameraObj, renderer.domElement);
-    let wasDragging = false; // 跟踪是否刚刚完成拖拽
     let transformStartState: {position: THREE.Vector3, rotation: THREE.Euler, scale: THREE.Vector3} | null = null; // 记录拖拽前的状态
     let transformObjectId: string | null = null; // 记录被操作的对象ID
     
@@ -499,7 +516,7 @@ export function EditorViewport() {
       
       // 如果从拖拽变为不拖拽,标记刚刚完成拖拽,并记录历史
       if (!event.value && transformStartState && transformObjectId) {
-        wasDragging = true;
+        gizmoWasDraggingRef.current = true;
         
         const obj = transformControls.object;
         if (obj) {
@@ -528,12 +545,25 @@ export function EditorViewport() {
           
           if (hasMoved || hasRotated || hasScaled) {
             const actionType = hasMoved ? 'move' : (hasRotated ? 'rotate' : 'scale');
-            
+
+            const before = {
+              objectId: transformObjectId,
+              position: startState.position as [number, number, number],
+              rotation: startState.rotation as [number, number, number],
+              scale: startState.scale as [number, number, number],
+            };
+            const after = {
+              objectId: transformObjectId,
+              position: endState.position as [number, number, number],
+              rotation: endState.rotation as [number, number, number],
+              scale: endState.scale as [number, number, number],
+            };
+
             useHistoryStore.getState().push({
               type: actionType,
               description: `${actionType} object`,
-              before: { objectId: transformObjectId, ...startState },
-              after: { objectId: transformObjectId, ...endState },
+              before,
+              after,
               objectId: transformObjectId,
             });
           }
@@ -541,7 +571,7 @@ export function EditorViewport() {
         
         // 100ms后重置标志,让后续点击正常工作
         setTimeout(() => {
-          wasDragging = false;
+          gizmoWasDraggingRef.current = false;
         }, 100);
         
         // 清空临时状态
@@ -550,7 +580,7 @@ export function EditorViewport() {
       }
     });
     
-    // Three.js 0.184: 必须将getHelper()返回的Object3D添加到scene才能渲染Gizmo
+    // Three.js 0.185: 必须将 getHelper() 返回的 Object3D 添加到 scene 才能渲染 Gizmo
     const gizmoHelper = transformControls.getHelper();
     scene.add(gizmoHelper);
     
@@ -603,11 +633,17 @@ export function EditorViewport() {
 
     // 点击事件处理 (对象选择)
     const handleClick = (event: MouseEvent) => {
-      // 如果正在拖拽Gizmo、刚刚完成Gizmo拖拽、或刚刚完成视角拖拽,不处理点击
-      const isDragging = typeof (window as any).__isOrbitDragging === 'function' 
-        ? (window as any).__isOrbitDragging() 
-        : isOrbitDragging;
-      if (transformControls.dragging || wasDragging || isDragging) return;
+      const renderer = rendererRef.current;
+      const cameraObj = cameraRef.current;
+      const scene = sceneRef.current;
+      const transformControls = transformControlsRef.current;
+      if (!renderer || !cameraObj || !scene || !transformControls) return;
+
+      const dragDx = event.clientX - pointerDownRef.current.x;
+      const dragDy = event.clientY - pointerDownRef.current.y;
+      if (Math.sqrt(dragDx * dragDx + dragDy * dragDy) > CLICK_DRAG_THRESHOLD_PX) return;
+
+      if (transformControls.dragging || gizmoWasDraggingRef.current) return;
 
       const rect = renderer.domElement.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -620,12 +656,20 @@ export function EditorViewport() {
       const gizmoHelper = gizmoHelperRef.current;
       
       scene.traverse((child) => {
-        // 包含Mesh和Group,排除TransformControls的Gizmo对象、网格、坐标轴、灯光等不可见对象
-        if ((child instanceof THREE.Mesh || child instanceof THREE.Group) && 
-            child.name !== 'grid' && 
-            child.name !== 'axes' &&
-            !(child instanceof THREE.Light)) {
-          // 检查是否是gizmoHelper或其子对象
+        if (child.name === 'grid' || child.name === 'axes') return;
+
+        const isLightPick = child.userData?.isLightPickProxy === true;
+        const isLightHelper = child.name.startsWith('helper_');
+        const isSceneObject =
+          (child instanceof THREE.Mesh || child instanceof THREE.Group) &&
+          !(child instanceof THREE.Light);
+
+        if (isLightPick || isLightHelper) {
+          clickableObjects.push(child);
+          return;
+        }
+
+        if (isSceneObject) {
           let isGizmo = false;
           if (gizmoHelper) {
             let current: THREE.Object3D | null = child;
@@ -637,7 +681,7 @@ export function EditorViewport() {
               current = current.parent;
             }
           }
-          
+
           if (!isGizmo) {
             clickableObjects.push(child);
           }
@@ -647,74 +691,44 @@ export function EditorViewport() {
       const intersects = raycasterRef.current.intersectObjects(clickableObjects, true);
 
       if (intersects.length > 0) {
-        // 直接选中最底层的mesh,不向上升查到Group
-        let selectedObject = intersects[0].object;
+        const hitObject = intersects[0].object;
+        const lightId = resolveLightIdFromPick(hitObject);
+
+        if (lightId) {
+          const light = lightsRef.current.get(lightId);
+          if (light && isTransformableLight(light)) {
+            useSceneStore.getState().deselectAll();
+            useLightStore.getState().selectLight(lightId);
+            transformControls.attach(light);
+            return;
+          }
+        }
+
+        let selectedObject = hitObject;
         
-        // 确保选中是Mesh或Group类型(排除辅助对象等)
         while (selectedObject.parent && 
                !(selectedObject instanceof THREE.Mesh) && 
                !(selectedObject instanceof THREE.Group)) {
           selectedObject = selectedObject.parent;
         }
         
-        // 确保对象可见
         selectedObject.visible = true;
-        
-        // 不再添加高亮效果,直接附加TransformControls
-        
-        // 附加TransformControls到选中对象(Mesh或Group都可以)
         transformControls.attach(selectedObject);
-        
-        // 策略1: 通过uuid查找(优先,支持子mesh)
-        let businessId = objects.find(obj => obj.id === selectedObject.uuid)?.id;
-        
-        // 策略1.5: 如果uuid没找到,直接使用uuid作为id(对于子mesh)
-        if (!businessId) {
-          // 对于子mesh,直接使用uuid作为id
-          businessId = selectedObject.uuid;
-        }
-        
-        // 策略2: 通过name精确匹配
-        if (!businessId) {
-          businessId = objects.find(obj => obj.name === selectedObject.name)?.id;
-        }
-        
-        // 策略3: 通过threeObjects映射查找
-        if (!businessId) {
-          const threeObjects = useSceneStore.getState().threeObjects;
-          for (const [id, threeObj] of threeObjects) {
-            if (threeObj === selectedObject || threeObj === selectedObject.parent) {
-              businessId = id;
-              break;
-            }
-          }
-        }
-        
-        // 策略4: 使用uuid作为ID (最后兜底)
-        if (!businessId) {
-          businessId = selectedObject.uuid;
-        }
-        
-        if (businessId) {
-          selectObject(businessId);
-        }
+
+        const businessId = resolveBusinessId(selectedObject);
+        useLightStore.getState().selectLight(null);
+        useSceneStore.getState().selectObject(businessId);
       } else {
-        // 点击空白处 - 取消所有选中状态
-        const currentSelectedIds = useSceneStore.getState().selectedIds;
+        const { selectedIds: currentSelectedIds, deselectAll: clearSelection } = useSceneStore.getState();
         const currentSelectedLightId = useLightStore.getState().selectedLightId;
-        
-        if (currentSelectedIds.length > 0) {
+
+        if (currentSelectedIds.length > 0 || currentSelectedLightId) {
           transformControls.detach();
-          // 清除高亮效果
           if ((window as any).__clearHighlight) {
             (window as any).__clearHighlight();
           }
-          deselectAll();
-        }
-        
-        // 取消灯光选中
-        if (currentSelectedLightId) {
-          selectLight(null);
+          clearSelection();
+          useLightStore.getState().selectLight(null);
         }
       }
     };
@@ -853,18 +867,14 @@ export function EditorViewport() {
 
       case 'film':
         pass = new FilmPass(
-          config.film?.noise || 0.25,
-          config.film?.scanlines || 0.025,
-          config.film?.grayscale || false,
-          config.film?.monochrome || false
+          config.film?.intensity ?? 0.25,
+          config.film?.grayscale ?? false
         );
         break;
 
       case 'glitch':
-        pass = new GlitchPass({
-          goWild: config.glitch?.wild || false,
-          factor: config.glitch?.factor || 0.6,
-        });
+        pass = new GlitchPass(config.glitch?.dtSize ?? 64);
+        pass.goWild = config.glitch?.goWild ?? false;
         break;
 
       case 'outline':
@@ -872,59 +882,56 @@ export function EditorViewport() {
           new THREE.Vector2(renderer.domElement.width, renderer.domElement.height),
           scene,
           camera,
-          {
-            edgeStrength: config.outline?.edgeStrength || 3.0,
-            edgeGlow: config.outline?.edgeGlow || 0.0,
-            edgeThickness: config.outline?.edgeThickness || 1.0,
-            pulsePeriod: config.outline?.pulsePeriod || 0,
-            usePatternTexture: false,
-          }
+          collectOutlineTargets(scene)
         );
+        if (config.outline) {
+          pass.edgeStrength = config.outline.edgeStrength ?? 3.0;
+          pass.edgeGlow = config.outline.edgeGlow ?? 0.5;
+          pass.edgeThickness = config.outline.edgeThickness ?? 1.0;
+          pass.pulsePeriod = config.outline.pulsePeriod ?? 0;
+          pass.visibleEdgeColor.set(0x00aaff);
+          pass.hiddenEdgeColor.set(0x190a05);
+        }
         break;
 
       case 'bokeh':
         pass = new BokehPass(scene, camera, {
-          focus: config.bokeh?.focus || 1.0,
-          aperture: config.bokeh?.aperture || 0.0001,
-          maxblur: config.bokeh?.maxblur || 0.01,
-          width: renderer.domElement.width,
-          height: renderer.domElement.height,
+          focus: config.bokeh?.focus ?? 1.0,
+          aperture: config.bokeh?.aperture ?? 0.0001,
+          maxblur: config.bokeh?.maxblur ?? 0.01,
         });
         break;
 
       case 'afterimage':
-        pass = new AfterimagePass(config.afterimage?.damp || 0.85);
+        pass = new AfterimagePass(config.afterimage?.damp ?? 0.88);
         break;
 
       case 'halftone':
-        pass = new HalftonePass(
-          renderer.domElement.width,
-          renderer.domElement.height,
-          {
-            radius: config.halftone?.radius || 4,
-            rotateR: config.halftone?.rotateR || -15,
-            rotateG: config.halftone?.rotateG || 45,
-            rotateB: config.halftone?.rotateB || 30,
-            scatter: config.halftone?.scatter || 0,
-            width: config.halftone?.width || 1,
-            height: config.halftone?.height || 1,
-            blending: config.halftone?.blending || 1,
-            usePattern: config.halftone?.usePattern || false,
-            shape: config.halftone?.shape || 1,
-          }
-        );
+        pass = new HalftonePass({
+          radius: config.halftone?.radius ?? 4,
+          rotateR: -15 * Math.PI / 180,
+          rotateG: 45 * Math.PI / 180,
+          rotateB: 30 * Math.PI / 180,
+          scatter: config.halftone?.scatter ?? 0.2,
+          blending: config.halftone?.blending ?? 1,
+          shape: 1,
+        });
         break;
 
       case 'dotscreen':
         pass = new DotScreenPass(
           new THREE.Vector2(0, 0),
-          45,
-          config.dotscreen?.scale || 1
+          config.dotscreen?.angle ?? 0.785,
+          config.dotscreen?.scale ?? 0.8
         );
         break;
 
       case 'sao':
-        pass = new SAOPass(scene, camera, false, renderer.domElement.width, renderer.domElement.height);
+        pass = new SAOPass(
+          scene,
+          camera,
+          new THREE.Vector2(renderer.domElement.width, renderer.domElement.height)
+        );
         if (config.sao) {
           pass.params.saoBias = config.sao.bias || 0.5;
           pass.params.saoIntensity = config.sao.intensity || 0.000005;
@@ -944,9 +951,8 @@ export function EditorViewport() {
         break;
 
       case 'pixelated':
-        const pixelSize = config.pixelated?.size || 8;
         pass = new RenderPixelatedPass(
-          pixelSize,
+          config.pixelated?.size ?? 6,
           scene,
           camera
         );
@@ -971,6 +977,7 @@ export function EditorViewport() {
   // 渲染循环 - 添加对后期处理状态变化的监控(使用useRef避免依赖变化导致重建)
   const postProcessEnabledRef = useRef<boolean>(false);
   const postProcessEffectRef = useRef<string>('none');
+  const postProcessGlitchDtRef = useRef<number>(64);
   
   const animate = useCallback(() => {
     animationFrameRef.current = requestAnimationFrame(animate);
@@ -979,10 +986,7 @@ export function EditorViewport() {
       controlsRef.current.update();
     }
     
-    // 更新TransformControls
-    if (transformControlsRef.current) {
-      transformControlsRef.current.update();
-    }
+    // TransformControls 在 r184 中由渲染循环自动更新，无需手动调用 update
     
     // 更新灯光Helper
     lightHelpersRef.current.forEach((helper) => {
@@ -994,19 +998,21 @@ export function EditorViewport() {
     // 检查后期处理配置变化(从全局读取)
     const postConfig = (window as any).__postProcessConfig;
     if (postConfig && postConfig.enabled) {
-      const needUpdate = postConfig.effect !== postProcessEffectRef.current || 
-                         !composerRef.current;
+      const glitchDt = postConfig.glitch?.dtSize ?? 64;
+      const needUpdate =
+        postConfig.effect !== postProcessEffectRef.current ||
+        !composerRef.current ||
+        (postConfig.effect === 'glitch' && glitchDt !== postProcessGlitchDtRef.current);
       
       if (needUpdate && postConfig.effect !== 'none') {
-        // 启用了后期处理且效果改变,使用composer渲染
         applyPostProcessEffect(postConfig.effect, postConfig);
         postProcessEffectRef.current = postConfig.effect;
+        postProcessGlitchDtRef.current = glitchDt;
         postProcessEnabledRef.current = true;
       }
       
-      // 更新pass参数(每帧同步)
-      if (composerRef.current && currentPassRef.current) {
-        updatePassParams(currentPassRef.current, postConfig);
+      if (composerRef.current && currentPassRef.current && rendererRef.current) {
+        updatePassParams(currentPassRef.current, postConfig, rendererRef.current);
       }
       
       // 使用composer渲染
@@ -1022,7 +1028,9 @@ export function EditorViewport() {
         postProcessEnabledRef.current = false;
         postProcessEffectRef.current = 'none';
       }
-      rendererRef.current.render(sceneRef.current, cameraRef.current);
+      if (rendererRef.current && sceneRef.current && cameraRef.current) {
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      }
     }
   }, [applyPostProcessEffect]);
 
@@ -1036,6 +1044,10 @@ export function EditorViewport() {
     cameraRef.current.aspect = width / height;
     cameraRef.current.updateProjectionMatrix();
     rendererRef.current.setSize(width, height);
+
+    if (composerRef.current) {
+      composerRef.current.setSize(width, height);
+    }
   }, []);
 
   // 初始化
@@ -1084,7 +1096,7 @@ export function EditorViewport() {
   useEffect(() => {
     if (!transformControlsRef.current) return;
 
-    const modeMap = {
+    const modeMap: Record<string, 'translate' | 'rotate' | 'scale'> = {
       select: 'translate',
       move: 'translate',
       rotate: 'rotate',
@@ -1101,8 +1113,22 @@ export function EditorViewport() {
 
     const onChange = () => {
       const object = transformControls.object;
-      if (object && selectedIds.length > 0) {
-        updateObject(selectedIds[0], {
+      if (!object) return;
+
+      const { selectedIds: currentSelectedIds, updateObject: syncObject } = useSceneStore.getState();
+      const { selectedLightId: currentLightId, updateLight: syncLight } = useLightStore.getState();
+
+      if (currentLightId && currentSelectedIds.length === 0 && object instanceof THREE.Light) {
+        syncLight(currentLightId, {
+          position: [object.position.x, object.position.y, object.position.z],
+        });
+        const helper = lightHelpersRef.current.get(currentLightId);
+        if (helper?.update) helper.update();
+        return;
+      }
+
+      if (currentSelectedIds.length > 0) {
+        syncObject(currentSelectedIds[0], {
           position: [object.position.x, object.position.y, object.position.z],
           rotation: [object.rotation.x, object.rotation.y, object.rotation.z],
           scale: [object.scale.x, object.scale.y, object.scale.z],
@@ -1115,7 +1141,22 @@ export function EditorViewport() {
     return () => {
       transformControls.removeEventListener('change', onChange);
     };
-  }, [selectedIds, updateObject]);
+  }, [selectedIds, updateObject, updateLight]);
+
+  // 选中灯光时附加变换控制器
+  useEffect(() => {
+    const transformControls = transformControlsRef.current;
+    if (!transformControls) return;
+
+    if (selectedLightId && selectedIds.length === 0) {
+      const light = lightsRef.current.get(selectedLightId);
+      if (light && isTransformableLight(light)) {
+        transformControls.attach(light);
+      } else {
+        transformControls.detach();
+      }
+    }
+  }, [selectedLightId, selectedIds, lights]);
 
   // 灯光同步 - 根据lightStore创建/更新Three.js灯光
   useEffect(() => {
@@ -1124,6 +1165,9 @@ export function EditorViewport() {
     // 移除不在lightStore中的灯光
     lightsRef.current.forEach((light, id) => {
       if (!lights.find(l => l.id === id)) {
+        if (light instanceof THREE.DirectionalLight) {
+          sceneRef.current!.remove(light.target);
+        }
         sceneRef.current!.remove(light);
         lightsRef.current.delete(id);
       }
@@ -1143,20 +1187,18 @@ export function EditorViewport() {
             );
             break;
 
-          case 'directional':
-            light = new THREE.DirectionalLight(
+          case 'directional': {
+            const dirLight = new THREE.DirectionalLight(
               new THREE.Color(lightConfig.color),
               lightConfig.intensity
             );
             if (lightConfig.position) {
-              light.position.set(...lightConfig.position);
+              dirLight.position.set(...lightConfig.position);
             }
-            if (lightConfig.castShadow) {
-              (light as THREE.DirectionalLight).castShadow = true;
-              (light as THREE.DirectionalLight).shadow.mapSize.width = lightConfig.shadowMapSize || 2048;
-              (light as THREE.DirectionalLight).shadow.mapSize.height = lightConfig.shadowMapSize || 2048;
-            }
+            applyDirectionalShadowSettings(dirLight, lightConfig);
+            light = dirLight;
             break;
+          }
 
           case 'point':
             light = new THREE.PointLight(
@@ -1194,70 +1236,81 @@ export function EditorViewport() {
               new THREE.Color(lightConfig.groundColor || '#444444'),
               lightConfig.intensity
             );
+            if (lightConfig.position) {
+              light.position.set(...lightConfig.position);
+            }
             break;
         }
 
         if (light) {
           light.name = lightConfig.name;
           light.userData.id = lightConfig.id;
+          light.visible = lightConfig.enabled !== false;
+          ensureLightPickProxy(light, lightConfig.id);
           sceneRef.current!.add(light);
+          if (light instanceof THREE.DirectionalLight) {
+            sceneRef.current!.add(light.target);
+          }
           lightsRef.current.set(lightConfig.id, light);
         }
       } else {
         // 更新现有灯光
-        light.color.set(lightConfig.color);
+        if (light instanceof THREE.HemisphereLight) {
+          light.color.set(lightConfig.color);
+          light.groundColor.set(lightConfig.groundColor || '#444444');
+        } else {
+          light.color.set(lightConfig.color);
+        }
         light.intensity = lightConfig.intensity;
-        light.visible = lightConfig.enabled;
+        light.visible = lightConfig.enabled !== false;
+        ensureLightPickProxy(light, lightConfig.id);
 
-        if (lightConfig.position && !(light instanceof THREE.AmbientLight || light instanceof THREE.HemisphereLight)) {
+        if (light instanceof THREE.DirectionalLight) {
+          applyDirectionalShadowSettings(light, lightConfig);
+        }
+
+        if (lightConfig.position && !(light instanceof THREE.AmbientLight)) {
           light.position.set(...lightConfig.position);
         }
       }
     });
   }, [lights]);
 
-  // 灯光Helper显示 - 选中灯光时显示Helper,取消选中时隐藏
+  // 灯光 Helper 显示 - 所有可定位灯光始终显示辅助线，便于视口拾取
   useEffect(() => {
     if (!sceneRef.current) return;
 
-    // 清除所有旧的Helper
-    lightHelpersRef.current.forEach((helper) => {
-      sceneRef.current!.remove(helper);
-    });
-    lightHelpersRef.current.clear();
+    const scene = sceneRef.current;
+    const positionalLightIds = new Set(
+      lights.filter((l) => l.type !== 'ambient').map((l) => l.id)
+    );
 
-    // 只有当选中灯光时才显示Helper,选中其他对象时不显示
-    if (selectedLightId && selectedIds.length === 0) {
-      const light = lightsRef.current.get(selectedLightId);
+    lightHelpersRef.current.forEach((helper, id) => {
+      if (!positionalLightIds.has(id)) {
+        scene.remove(helper);
+        if (typeof helper.dispose === 'function') helper.dispose();
+        lightHelpersRef.current.delete(id);
+      }
+    });
+
+    lights.forEach((lightConfig) => {
+      if (lightConfig.type === 'ambient') return;
+
+      const light = lightsRef.current.get(lightConfig.id);
       if (!light) return;
 
-      let helper: any = null;
-
-      switch (light.type) {
-        case 'DirectionalLight':
-          helper = new THREE.DirectionalLightHelper(light as THREE.DirectionalLight, 5);
-          break;
-        case 'PointLight':
-          helper = new THREE.PointLightHelper(light as THREE.PointLight, 0.5);
-          break;
-        case 'SpotLight':
-          helper = new THREE.SpotLightHelper(light as THREE.SpotLight);
-          break;
-        case 'HemisphereLight':
-          helper = new THREE.HemisphereLightHelper(light as THREE.HemisphereLight, 1);
-          break;
-        case 'AmbientLight':
-          // AmbientLight没有Helper,因为它没有位置
-          break;
+      let helper = lightHelpersRef.current.get(lightConfig.id);
+      if (!helper) {
+        helper = createLightHelper(light);
+        if (!helper) return;
+        helper.name = `helper_${lightConfig.id}`;
+        scene.add(helper);
+        lightHelpersRef.current.set(lightConfig.id, helper);
+      } else if (helper.update) {
+        helper.update();
       }
-
-      if (helper) {
-        helper.name = `helper_${selectedLightId}`;
-        sceneRef.current.add(helper);
-        lightHelpersRef.current.set(selectedLightId, helper);
-      }
-    }
-  }, [selectedLightId, selectedIds, lights]);
+    });
+  }, [lights, selectedLightId]);
 
   return (
     <div

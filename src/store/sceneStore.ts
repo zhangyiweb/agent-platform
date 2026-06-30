@@ -85,10 +85,15 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     })),
 
   removeObject: (id) =>
-    set((state) => ({
-      objects: state.objects.filter((obj) => obj.id !== id),
-      selectedIds: state.selectedIds.filter((sid) => sid !== id),
-    })),
+    set((state) => {
+      const newMap = new Map(state.threeObjects);
+      newMap.delete(id);
+      return {
+        objects: state.objects.filter((obj) => obj.id !== id),
+        selectedIds: state.selectedIds.filter((sid) => sid !== id),
+        threeObjects: newMap,
+      };
+    }),
 
   selectObject: (id, multi = false) =>
     set((state) => ({

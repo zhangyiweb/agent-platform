@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { LightState, LightConfig, LightAction } from '@/types/light';
+import { DEFAULT_LIGHTS } from '@/config/defaultLighting';
 
 interface LightStore extends LightState {
-  // 添加灯光
-  addLight: (config: Omit<LightConfig, 'id'>) => void;
+  // 添加灯光，返回新灯光 ID
+  addLight: (config: Omit<LightConfig, 'id'>) => string;
   
   // 移除灯光
   removeLight: (id: string) => void;
@@ -24,39 +25,30 @@ interface LightStore extends LightState {
   resetLights: () => void;
 }
 
-const defaultLights: LightConfig[] = [
-  {
-    id: 'light_ambient_default',
-    name: '环境光',
-    type: 'ambient',
-    enabled: true,
-    color: '#ffffff',
-    intensity: 0.5,
-    castShadow: false,
-  },
-];
-
 const initialState: LightState = {
-  lights: defaultLights,
+  lights: [...DEFAULT_LIGHTS],
   selectedLightId: null,
 };
 
 export const useLightStore = create<LightStore>((set) => ({
   ...initialState,
 
-  addLight: (config) =>
-    set((state) => {
-      const id = `light_${Date.now()}`;
-      const newLight: LightConfig = {
-        ...config,
-        id,
-        name: config.name || `${config.type}_${id.slice(-4)}`,
-      };
-      
-      return {
-        lights: [...state.lights, newLight],
-      };
-    }),
+  addLight: (config) => {
+    const id = `light_${Date.now()}`;
+    const newLight: LightConfig = {
+      ...config,
+      id,
+      name: config.name || `${config.type}_${id.slice(-4)}`,
+      enabled: config.enabled ?? true,
+      castShadow: config.castShadow ?? false,
+    };
+
+    set((state) => ({
+      lights: [...state.lights, newLight],
+    }));
+
+    return id;
+  },
 
   removeLight: (id) =>
     set((state) => ({

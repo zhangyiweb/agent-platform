@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 
 interface MaterialEditorProps {
@@ -79,6 +79,15 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
   const metalnessMapFileRef = useRef<HTMLInputElement>(null);
   const emissiveMapFileRef = useRef<HTMLInputElement>(null);
 
+  // UV 参数
+  const [uvRepeatX, setUvRepeatX] = useState(1);
+  const [uvRepeatY, setUvRepeatY] = useState(1);
+  const [uvOffsetX, setUvOffsetX] = useState(0);
+  const [uvOffsetY, setUvOffsetY] = useState(0);
+  const [uvRotation, setUvRotation] = useState(0);
+  const [wrapS, setWrapS] = useState<number>(THREE.RepeatWrapping);
+  const [wrapT, setWrapT] = useState<number>(THREE.RepeatWrapping);
+
   // 当材质变化时,更新参数
   useEffect(() => {
     if (material) {
@@ -150,10 +159,66 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
       } else {
         setEmissiveMapPreview(null);
       }
+
+      const refTex: THREE.Texture | null =
+        mat.map || mat.normalMap || mat.roughnessMap || mat.metalnessMap || mat.emissiveMap || null;
+      if (refTex) {
+        setUvRepeatX(refTex.repeat?.x ?? 1);
+        setUvRepeatY(refTex.repeat?.y ?? 1);
+        setUvOffsetX(refTex.offset?.x ?? 0);
+        setUvOffsetY(refTex.offset?.y ?? 0);
+        setUvRotation(THREE.MathUtils.radToDeg(refTex.rotation ?? 0));
+        setWrapS(refTex.wrapS ?? THREE.RepeatWrapping);
+        setWrapT(refTex.wrapT ?? THREE.RepeatWrapping);
+      }
     }
   }, [material]);
 
-  // 将Texture转换为DataURL用于预览
+  const applyUvParams = useCallback((params: {
+    repeatX: number; repeatY: number; offsetX: number; offsetY: number;
+    rotation: number; wrapS: number; wrapT: number;
+  }) => {
+    if (!material) return;
+    const mat = material as unknown as Record<string, unknown>;
+    const keys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'bumpMap'];
+    keys.forEach((key) => {
+      const tex = mat[key] as THREE.Texture | undefined;
+      if (!tex) return;
+      tex.wrapS = params.wrapS as THREE.Wrapping;
+      tex.wrapT = params.wrapT as THREE.Wrapping;
+      tex.repeat.set(params.repeatX, params.repeatY);
+      tex.offset.set(params.offsetX, params.offsetY);
+      tex.rotation = THREE.MathUtils.degToRad(params.rotation);
+      tex.needsUpdate = true;
+    });
+    material.needsUpdate = true;
+    onMaterialChange(material);
+  }, [material, onMaterialChange]);
+
+  const getUvParams = () => ({
+    repeatX: uvRepeatX, repeatY: uvRepeatY, offsetX: uvOffsetX, offsetY: uvOffsetY,
+    rotation: uvRotation, wrapS, wrapT,
+  });
+
+  const handleUvChange = (field: string, value: number) => {
+    const params = getUvParams();
+    switch (field) {
+      case 'repeatX': params.repeatX = value; setUvRepeatX(value); break;
+      case 'repeatY': params.repeatY = value; setUvRepeatY(value); break;
+      case 'offsetX': params.offsetX = value; setUvOffsetX(value); break;
+      case 'offsetY': params.offsetY = value; setUvOffsetY(value); break;
+      case 'rotation': params.rotation = value; setUvRotation(value); break;
+    }
+    applyUvParams(params);
+  };
+
+  const handleWrapChange = (axis: 'S' | 'T', value: number) => {
+    const params = getUvParams();
+    if (axis === 'S') { params.wrapS = value; setWrapS(value); }
+    else { params.wrapT = value; setWrapT(value); }
+    applyUvParams(params);
+  };
+
   const textureToDataUrl = (texture: THREE.Texture): string | null => {
     if (!texture || !texture.image) return null;
     
@@ -185,7 +250,7 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
       fog,
     };
 
-    // 根据材质类型创建实例 (NodeMaterial在Three.js 0.184中可能不可用)
+    // 根据材质类型创建实例 (NodeMaterial 在 Three.js 0.185 中可能不可用)
     switch (type) {
       case 'MeshBasicMaterial':
         newMaterial = new THREE.MeshBasicMaterial(baseProps);
@@ -298,7 +363,7 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
         });
         break;
         
-      // NodeMaterial - Three.js 0.184可能不支持,降级到普通材质
+      // NodeMaterial - Three.js 0.185 可能不支持，降级到普通材质
       case 'MeshBasicNodeMaterial':
       case 'MeshStandardNodeMaterial':
       case 'MeshPhysicalNodeMaterial':
@@ -929,6 +994,98 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* UV 设置 */}
+      {hasColor && (
+        <div className="mb-4 pt-3 border-t border-gray-700">
+          <h4 className="text-xs font-medium text-gray-300 mb-3">UV 变换</h4>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">重复 U</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0.01"
+                value={uvRepeatX}
+                onChange={(e) => handleUvChange('repeatX', parseFloat(e.target.value) || 1)}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">重复 V</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0.01"
+                value={uvRepeatY}
+                onChange={(e) => handleUvChange('repeatY', parseFloat(e.target.value) || 1)}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">偏移 U</label>
+              <input
+                type="number"
+                step="0.01"
+                value={uvOffsetX}
+                onChange={(e) => handleUvChange('offsetX', parseFloat(e.target.value) || 0)}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">偏移 V</label>
+              <input
+                type="number"
+                step="0.01"
+                value={uvOffsetY}
+                onChange={(e) => handleUvChange('offsetY', parseFloat(e.target.value) || 0)}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              />
+            </div>
+          </div>
+          <div className="mb-2">
+            <label className="text-[10px] text-gray-500 block mb-0.5">
+              旋转 (°): {uvRotation.toFixed(1)}
+            </label>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={uvRotation}
+              onChange={(e) => handleUvChange('rotation', parseFloat(e.target.value))}
+              className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">包裹 U</label>
+              <select
+                value={wrapS}
+                onChange={(e) => handleWrapChange('S', parseInt(e.target.value))}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              >
+                <option value={THREE.RepeatWrapping}>重复</option>
+                <option value={THREE.ClampToEdgeWrapping}>拉伸</option>
+                <option value={THREE.MirroredRepeatWrapping}>镜像</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">包裹 V</label>
+              <select
+                value={wrapT}
+                onChange={(e) => handleWrapChange('T', parseInt(e.target.value))}
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              >
+                <option value={THREE.RepeatWrapping}>重复</option>
+                <option value={THREE.ClampToEdgeWrapping}>拉伸</option>
+                <option value={THREE.MirroredRepeatWrapping}>镜像</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-[10px] text-gray-600 mt-2">同步应用于所有已加载贴图</p>
         </div>
       )}
 
