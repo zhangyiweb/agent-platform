@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { CameraTour } from '@/types/cameraTour';
+import { normalizeCameraTour } from '@/types/cameraTour';
+import { buildTourSplines, sampleSplinePath } from '@/utils/cameraTourSpline';
 
 const PATH_NAME = 'helper_tour_path';
 const MARKER_PREFIX = 'helper_tour_marker_';
@@ -31,7 +33,7 @@ function truncateLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: nu
   return `${truncated}…`;
 }
 
-function createLabelSprite(text: string): THREE.Sprite {
+function createLabelSprite(text: string, accent: number): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   const paddingX = 10;
@@ -49,7 +51,8 @@ function createLabelSprite(text: string): THREE.Sprite {
 
   ctx.font = LABEL_FONT;
   ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-  ctx.strokeStyle = 'rgba(255, 204, 0, 0.85)';
+  const strokeColor = accent === 0x22d3ee ? 'rgba(34, 211, 238, 0.9)' : 'rgba(255, 204, 0, 0.85)';
+  ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 2;
   const radius = 6;
   ctx.beginPath();
@@ -93,35 +96,50 @@ export function syncTourPathVisual(scene: THREE.Scene, tour: CameraTour | null) 
 
   if (!tour || tour.stops.length === 0) return;
 
-  const positions = tour.stops.flatMap((s) => [s.position.x, s.position.y, s.position.z]);
-  if (positions.length >= 6) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const line = new THREE.Line(
-      geometry,
-      new THREE.LineBasicMaterial({ color: 0xffcc00, linewidth: 2 })
-    );
-    line.name = PATH_NAME;
-    line.userData.isEditorHelper = true;
-    scene.add(line);
+  const normalized = normalizeCameraTour(tour);
+  const isSpline = normalized.mode === 'spline';
+  const pathColor = isSpline ? 0x22d3ee : 0xffcc00;
+  const markerDefault = isSpline ? 0x22d3ee : 0xffcc00;
+
+  if (normalized.stops.length >= 2) {
+    let pathPoints: THREE.Vector3[];
+
+    if (isSpline) {
+      const curves = buildTourSplines(normalized);
+      pathPoints = curves ? sampleSplinePath(curves, 80) : [];
+    } else {
+      pathPoints = normalized.stops.map(
+        (s) => new THREE.Vector3(s.position.x, s.position.y, s.position.z)
+      );
+    }
+
+    if (pathPoints.length >= 2) {
+      const geometry = new THREE.BufferGeometry().setFromPoints(pathPoints);
+      const line = new THREE.Line(
+        geometry,
+        new THREE.LineBasicMaterial({ color: pathColor, linewidth: 2 })
+      );
+      line.name = PATH_NAME;
+      line.userData.isEditorHelper = true;
+      scene.add(line);
+    }
   }
 
-  tour.stops.forEach((stop, index) => {
+  normalized.stops.forEach((stop, index) => {
     const group = new THREE.Group();
     group.name = `${MARKER_PREFIX}${index}`;
     group.userData.isEditorHelper = true;
     group.position.set(stop.position.x, stop.position.y, stop.position.z);
 
+    const markerColor = stop.type === 'focus' ? 0x3b82f6 : markerDefault;
     const marker = new THREE.Mesh(
       new THREE.SphereGeometry(0.15, 12, 12),
-      new THREE.MeshBasicMaterial({
-        color: stop.type === 'focus' ? 0x3b82f6 : 0xffcc00,
-      })
+      new THREE.MeshBasicMaterial({ color: markerColor })
     );
     marker.userData.isEditorHelper = true;
     group.add(marker);
 
-    const label = createLabelSprite(`${index + 1}. ${stop.name}`);
+    const label = createLabelSprite(`${index + 1}. ${stop.name}`, markerColor);
     group.add(label);
 
     scene.add(group);

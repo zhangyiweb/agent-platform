@@ -25,6 +25,7 @@ import { useModelLoader } from '@/hooks/useModelLoader';
 import { useLightStore } from '@/store/lightStore';
 import { useHistoryStore } from '@/store/historyStore';
 import { tickTextureUvAnimations } from '@/utils/textureAnimationRuntime';
+import { tickEditorCameraFly } from '@/utils/cameraTourPlayer';
 import { tickEditorCameraTour } from '@/components/Panels/CameraTourPanel';
 import { disposeObject3DResources } from '@/utils/sceneUtils';
 import {
@@ -1052,7 +1053,8 @@ export function EditorViewport() {
     const delta = timerRef.current.getDelta();
 
     const tourActive = tickEditorCameraTour(delta);
-    if (controlsRef.current && !tourActive) {
+    const flyActive = tickEditorCameraFly(delta);
+    if (controlsRef.current && !tourActive && !flyActive) {
       controlsRef.current.update();
     }
     

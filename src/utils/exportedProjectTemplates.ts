@@ -432,11 +432,10 @@ python -m http.server 8080
 - **改 HDR**：替换 \`assets/hdr/\` 下文件，并更新 \`scene.json\` 中 \`assets.hdr\` 路径。
 - **贴图 / UV**：\`editor.textureUvStates\` 保存各对象 repeat/offset/wrap 等参数；加载 GLB 后会规范化出厂默认包裹为「重复」，并写入 \`scene.json\` 中的 UV 状态。从 Poly Haven 应用的贴图会额外写入 \`assets.textures\` 目录，并在 \`scene.json\` 的 \`assets.textures\` 中记录路径与来源。
 - **Poly Haven 模型**：\`editor.polyhavenModels\` 记录从模型库导入的资产 id 与分辨率；模型几何与贴图已打包进 \`scene.glb\`，贴图原件另存于 \`assets/textures/\`。
-- **相机漫游工具包**：导出包内含 \`js/cameraTour.js\`（独立模块，无 UI）与 \`config/camera-tour.json\`。
-  - JSON 中 \`waypoints[]\` 每项含 \`name\`（漫游点名称）、\`position\`（相机坐标）、\`target\`（目标点）、\`dwellTime\` / \`transitionTime\`；
-  - \`route\` 为按顺序连接的折线，便于画路径，动画以 waypoints 为准。
-  - \`main.js\` 加载后挂载 \`window.cameraTour\`，可调用 \`play()\` / \`pause()\` / \`goToStop(n)\` 等；\`stopChange\` 事件会带回漫游点 \`name\`。
-  - 完整 API、JSON 字段说明与导航按钮示例见 \`js/cameraTour.js\` 文件顶部注释。
+- **相机漫游工具包**：导出包内含 \`js/cameraTour.js\` 与 \`config/camera-tour.json\`。
+  - \`tour.mode\`：\`stop\` 站点停靠（看设备），\`spline\` 一镜到底曲线漫游（园区参观）。
+  - \`waypoints[]\` 含漫游点名称、相机坐标、目标点；\`route.curveSamples\` 为曲线采样（spline 模式）。
+  - \`window.cameraTour.play()\` 等 API 详见 \`js/cameraTour.js\` 顶部注释。
 - **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存了编辑器中的后期参数，\`main.js\` 未内置完整后期管线，可按需接入 EffectComposer。
 
 ## 依赖

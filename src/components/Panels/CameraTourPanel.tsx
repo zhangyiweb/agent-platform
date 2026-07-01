@@ -22,11 +22,13 @@ import { useSceneStore } from '@/store/sceneStore';
 import {
   CameraTourPlayer,
   captureCurrentCameraState,
-  applyEditorCameraState,
+  startEditorCameraFly,
+  cancelEditorCameraFly,
 } from '@/utils/cameraTourPlayer';
-import { buildCameraTourJson, downloadCameraTourJson } from '@/utils/cameraTourJson';
+import { buildCameraTourJsonPreview, downloadCameraTourJson } from '@/utils/cameraTourJson';
 import { syncTourPathVisual } from '@/utils/cameraTourVisual';
-import type { CameraTourStop } from '@/types/cameraTour';
+import type { CameraTourMode, CameraTourStop } from '@/types/cameraTour';
+import { DEFAULT_SPLINE_DURATION, normalizeCameraTour } from '@/types/cameraTour';
 import * as THREE from 'three';
 
 const { Text } = Typography;
@@ -39,6 +41,7 @@ interface StopCardProps {
   stop: CameraTourStop;
   index: number;
   total: number;
+  tourMode: CameraTourMode;
   isDragging: boolean;
   isDragOver: boolean;
   onMove: (direction: 'up' | 'down') => void;
@@ -56,6 +59,7 @@ function StopCard({
   stop,
   index,
   total,
+  tourMode,
   isDragging,
   isDragOver,
   onMove,
@@ -164,13 +168,15 @@ function StopCard({
               onMouseDown={(e) => e.stopPropagation()}
               title="重命名"
             />
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                stop.type === 'focus' ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700/80 text-gray-400'
-              }`}
-            >
-              {stop.type === 'focus' ? '设备' : '路径'}
-            </span>
+            {tourMode !== 'spline' && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+                  stop.type === 'focus' ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700/80 text-gray-400'
+                }`}
+              >
+                {stop.type === 'focus' ? '设备' : '路径'}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -215,30 +221,32 @@ function StopCard({
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5 pl-4">
-        <div>
-          <Text className="text-[10px] text-gray-500">飞入(秒)</Text>
-          <input
-            type="number"
-            min={0.1}
-            step={0.5}
-            value={stop.transitionTime}
-            onChange={(e) => onUpdate({ transitionTime: parseFloat(e.target.value) || 0.1 })}
-            className="w-full px-1.5 py-0.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
-          />
+      {tourMode === 'stop' && (
+        <div className="grid grid-cols-2 gap-1.5 pl-4">
+          <div>
+            <Text className="text-[10px] text-gray-500">飞入(秒)</Text>
+            <input
+              type="number"
+              min={0.1}
+              step={0.5}
+              value={stop.transitionTime}
+              onChange={(e) => onUpdate({ transitionTime: parseFloat(e.target.value) || 0.1 })}
+              className="w-full px-1.5 py-0.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+            />
+          </div>
+          <div>
+            <Text className="text-[10px] text-gray-500">停留(秒)</Text>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={stop.dwellTime}
+              onChange={(e) => onUpdate({ dwellTime: parseFloat(e.target.value) || 0 })}
+              className="w-full px-1.5 py-0.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+            />
+          </div>
         </div>
-        <div>
-          <Text className="text-[10px] text-gray-500">停留(秒)</Text>
-          <input
-            type="number"
-            min={0}
-            step={0.5}
-            value={stop.dwellTime}
-            onChange={(e) => onUpdate({ dwellTime: parseFloat(e.target.value) || 0 })}
-            className="w-full px-1.5 py-0.5 text-xs bg-gray-700 text-white border border-gray-600 rounded"
-          />
-        </div>
-      </div>
+      )}
 
       <div className="flex gap-1 justify-end tour-stop-actions">
         <Button
@@ -279,6 +287,8 @@ export function CameraTourPanel() {
     removeTour,
     renameTour,
     setTourLoop,
+    setTourMode,
+    setSplineDuration,
     addStop,
     updateStop,
     removeStop,
@@ -298,7 +308,8 @@ export function CameraTourPanel() {
   const [exportPreview, setExportPreview] = useState('');
   const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const activeTour = getActiveTour();
+  const activeTourRaw = getActiveTour();
+  const activeTour = activeTourRaw ? normalizeCameraTour(activeTourRaw) : null;
 
   const initializedRef = useRef(false);
 
@@ -322,9 +333,10 @@ export function CameraTourPanel() {
     }).__editorControls;
     const tour = getActiveTour();
     if (!camera || !controls || !tour) return null;
+    const normalizedTour = normalizeCameraTour(tour);
 
     if (!playerRef.current) {
-      playerRef.current = new CameraTourPlayer(camera, controls, tour, {
+      playerRef.current = new CameraTourPlayer(camera, controls, normalizedTour, {
         onComplete: () => {
           setPreviewPlaying(false);
           setPlayerUiState('idle');
@@ -341,7 +353,7 @@ export function CameraTourPanel() {
         },
       });
     } else {
-      playerRef.current.setTour(tour);
+      playerRef.current.setTour(normalizedTour);
     }
     bindEditorTourPlayer(playerRef.current);
     return playerRef.current;
@@ -355,8 +367,24 @@ export function CameraTourPanel() {
       return;
     }
 
-    const selected = selectedIds[0] ? objects.find((o) => o.id === selectedIds[0]) : null;
+    const normalized = normalizeCameraTour(tour);
     const index = tour.stops.length + 1;
+
+    if (normalized.mode === 'spline') {
+      addStop(
+        tour.id,
+        createDefaultStopFields({
+          name: `漫游点 ${index}`,
+          type: 'waypoint',
+          position: captured.position,
+          target: captured.target,
+        })
+      );
+      message.success('已添加曲线关键帧');
+      return;
+    }
+
+    const selected = selectedIds[0] ? objects.find((o) => o.id === selectedIds[0]) : null;
 
     if (selected) {
       addStop(
@@ -387,9 +415,15 @@ export function CameraTourPanel() {
   };
 
   const handlePreviewPlay = () => {
+    cancelEditorCameraFly();
     const player = ensurePlayer();
-    if (!player || !activeTour?.stops.length) {
+    const tour = activeTour;
+    if (!player || !tour?.stops.length) {
       message.warning('请先添加漫游点');
+      return;
+    }
+    if (tour.mode === 'spline' && tour.stops.length < 2) {
+      message.warning('一镜到底至少需要 2 个漫游点');
       return;
     }
     if (player.getState() === 'paused') {
@@ -423,11 +457,12 @@ export function CameraTourPanel() {
         setPreviewPlaying(false);
         setPlayerUiState('idle');
       }
-      if (!applyEditorCameraState(stop.position, stop.target)) {
+      cancelEditorCameraFly();
+      if (!startEditorCameraFly(stop.position, stop.target, stop.transitionTime)) {
         message.warning('场景未就绪，请稍后再试');
         return;
       }
-      message.success(`已跳转到「${stop.name}」`);
+      message.success(`正在前往「${stop.name}」`);
     },
     [playerUiState, setPreviewPlaying]
   );
@@ -455,7 +490,7 @@ export function CameraTourPanel() {
       message.warning('当前路线没有漫游点');
       return;
     }
-    setExportPreview(JSON.stringify(buildCameraTourJson(tour), null, 2));
+    setExportPreview(buildCameraTourJsonPreview(tour));
     setExportModalOpen(true);
   };
 
@@ -555,14 +590,54 @@ export function CameraTourPanel() {
       </div>
 
       {activeTour && (
-        <div className="shrink-0 flex items-center justify-between">
-          <Text className="text-xs text-gray-400">循环播放</Text>
-          <Switch
-            size="small"
-            checked={activeTour.loop}
-            onChange={(v) => setTourLoop(activeTour.id, v)}
-          />
-        </div>
+        <>
+          <div className="shrink-0">
+            <Text className="text-xs text-gray-400 block mb-1.5">漫游方式</Text>
+            <Select
+              size="small"
+              className="w-full"
+              value={activeTour.mode}
+              onChange={(v) => {
+                setTourMode(activeTour.id, v);
+                handlePreviewStop();
+              }}
+              options={[
+                { value: 'stop', label: '站点漫游（逐站看设备）' },
+                { value: 'spline', label: '一镜到底（曲线参观）' },
+              ]}
+            />
+            <Text className="text-[10px] text-gray-500 leading-relaxed block mt-1.5">
+              {activeTour.mode === 'stop'
+                ? '逐站飞入并停留，适合聚焦设备查看。'
+                : '关键点用平滑曲线连接，相机沿路径连续移动，适合园区/厂区整体参观。'}
+            </Text>
+          </div>
+
+          <div className="shrink-0 flex items-center justify-between">
+            <Text className="text-xs text-gray-400">循环播放</Text>
+            <Switch
+              size="small"
+              checked={activeTour.loop}
+              onChange={(v) => setTourLoop(activeTour.id, v)}
+            />
+          </div>
+
+          {activeTour.mode === 'spline' && (
+            <div className="shrink-0">
+              <Text className="text-[10px] text-gray-500 block mb-1">全程时长(秒)</Text>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={activeTour.splineDuration ?? DEFAULT_SPLINE_DURATION}
+                onChange={(e) =>
+                  setSplineDuration(activeTour.id, parseFloat(e.target.value) || DEFAULT_SPLINE_DURATION)
+                }
+                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+              />
+            </div>
+          )}
+        </>
       )}
 
       <div className="shrink-0">
@@ -570,7 +645,9 @@ export function CameraTourPanel() {
           添加漫游点（当前视角）
         </Button>
         <Text className="text-[10px] text-gray-500 leading-relaxed block mt-2">
-          选中设备后添加会绑定设备名。可拖动漫游点卡片调整顺序；「跳转视角」预览、「更新视角」保存当前相机位置。
+          {activeTour?.mode === 'spline'
+            ? '沿路径添加关键帧，场景中青色曲线为漫游轨迹。可拖动排序、跳转/更新视角。'
+            : '选中设备后添加会绑定设备名。可拖动排序、跳转/更新视角。'}
         </Text>
       </div>
 
@@ -603,6 +680,7 @@ export function CameraTourPanel() {
               stop={stop}
               index={index}
               total={activeTour.stops.length}
+              tourMode={activeTour.mode}
               isDragging={dragFromIndex === index}
               isDragOver={dragOverIndex === index}
               onMove={(dir) => moveStop(activeTour.id, stop.id, dir)}
@@ -629,7 +707,7 @@ export function CameraTourPanel() {
         title={
           <div>
             <div className="text-base font-semibold text-gray-100">漫游 JSON 数据</div>
-            <div className="text-xs font-normal text-gray-500 mt-0.5">预览完整配置，确认后可下载文件</div>
+            <div className="text-xs font-normal text-gray-500 mt-0.5">含字段说明注释，确认后可下载标准 JSON 文件</div>
           </div>
         }
         open={exportModalOpen}

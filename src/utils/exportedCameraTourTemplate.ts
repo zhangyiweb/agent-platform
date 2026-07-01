@@ -18,12 +18,15 @@ export function buildCameraTourJs(): string {
  *   "version": "1.0",
  *   "tour": {
  *     "id": "tour_xxx",
- *     "name": "默认漫游",        // 路线名称
- *     "loop": false              // 是否循环播放
+ *     "name": "默认漫游",
+ *     "mode": "stop",            // stop=站点停靠 | spline=一镜到底曲线漫游
+ *     "loop": false,
+ *     "splineDuration": 30       // mode=spline 时全程秒数
  *   },
  *   "route": {
- *     "points": [ { "x", "y", "z" }, ... ],           // 按顺序的相机位置折线
- *     "lineSegments": [ { "from": Vec3, "to": Vec3 } ] // 相邻点连线，便于画路径
+ *     "points": [ ... ],
+ *     "lineSegments": [ ... ],
+ *     "curveSamples": [ ... ]     // mode=spline 时的平滑曲线采样（可选，便于画线）
  *   },
  *   "waypoints": [
  *     {
@@ -40,7 +43,7 @@ export function buildCameraTourJs(): string {
  *   ]
  * }
  *
- * route 仅用于可视化折线；实际漫游动画以 waypoints[].position / target 为准。
+ * route 用于可视化；stop 模式按 waypoints 逐站播放，spline 模式沿 Catmull-Rom 样条连续漫游。
  *
  * ── 自动初始化（main.js 已处理，一般无需手写）──
  *
@@ -129,7 +132,9 @@ function configToTour(json) {
   return {
     id: json.tour?.id || 'tour',
     name: json.tour?.name || '漫游',
+    mode: json.tour?.mode || 'stop',
     loop: Boolean(json.tour?.loop),
+    splineDuration: json.tour?.splineDuration ?? 30,
     stops: json.waypoints.map((w, i) => ({
       id: 'stop_' + i,
       name: w.name || ('漫游点 ' + (i + 1)),
@@ -141,6 +146,17 @@ function configToTour(json) {
       dwellTime: w.dwellTime ?? 2,
       transitionTime: w.transitionTime ?? 2,
     })),
+  };
+}
+
+function buildSplines(t) {
+  if (!t?.stops || t.stops.length < 2) return null;
+  const positions = t.stops.map((s) => new THREE.Vector3(s.position.x, s.position.y, s.position.z));
+  const targets = t.stops.map((s) => new THREE.Vector3(s.target.x, s.target.y, s.target.z));
+  const closed = Boolean(t.loop && t.stops.length >= 3);
+  return {
+    position: new THREE.CatmullRomCurve3(positions, closed, 'centripetal', 0.5),
+    target: new THREE.CatmullRomCurve3(targets, closed, 'centripetal', 0.5),
   };
 }
 
@@ -161,6 +177,9 @@ export function createCameraTourController(options) {
   let stopIndex = 0;
   let phase = 'transition';
   let phaseElapsed = 0;
+  let splineElapsed = 0;
+  let splines = null;
+  let lastSplineStopIndex = -1;
   const fromPosition = new THREE.Vector3();
   const fromTarget = new THREE.Vector3();
   const tempPosition = new THREE.Vector3();
@@ -201,6 +220,25 @@ export function createCameraTourController(options) {
     setState('playing');
   }
 
+  function applySpline(t) {
+    if (!splines) return;
+    const pos = splines.position.getPoint(t);
+    const tgt = splines.target.getPoint(t);
+    camera.position.copy(pos);
+    controls.target.copy(tgt);
+    controls.update();
+  }
+
+  function emitSplineStopAt(t) {
+    const count = tour?.stops?.length || 0;
+    if (count <= 1) return;
+    const index = Math.min(count - 1, Math.round(t * (count - 1)));
+    if (index !== lastSplineStopIndex) {
+      lastSplineStopIndex = index;
+      emit('stopChange', index, tour.stops[index]);
+    }
+  }
+
   const api = {
     /** 加载 JSON 配置（可多次调用以切换路线） */
     async loadConfig(urlOrObject) {
@@ -216,6 +254,17 @@ export function createCameraTourController(options) {
     /** 从第一个漫游点开始顺序播放 */
     play() {
       if (!tour?.stops?.length) return;
+      if (tour.mode === 'spline') {
+        if (tour.stops.length < 2) return;
+        splines = buildSplines(tour);
+        if (!splines) return;
+        controls.enabled = false;
+        splineElapsed = 0;
+        lastSplineStopIndex = 0;
+        applySpline(0);
+        setState('playing');
+        return;
+      }
       controls.enabled = false;
       stopIndex = 0;
       beginTransitionFromCurrent();
@@ -227,13 +276,19 @@ export function createCameraTourController(options) {
     },
 
     resume() {
-      if (state === 'paused') setState(phase === 'dwell' ? 'dwelling' : 'playing');
+      if (state === 'paused') {
+        if (tour?.mode === 'spline') setState('playing');
+        else setState(phase === 'dwell' ? 'dwelling' : 'playing');
+      }
     },
 
     /** 停止漫游并恢复手动 OrbitControls */
     stop() {
       state = 'idle';
       phaseElapsed = 0;
+      splineElapsed = 0;
+      splines = null;
+      lastSplineStopIndex = -1;
       controls.enabled = true;
       emit('stateChange', 'idle');
     },
@@ -246,6 +301,21 @@ export function createCameraTourController(options) {
     goToStop(index, immediate = false) {
       if (!tour?.stops?.length || index < 0 || index >= tour.stops.length) return;
       controls.enabled = false;
+      if (tour.mode === 'spline') {
+        splines = buildSplines(tour);
+        if (!splines) return;
+        const t = tour.stops.length <= 1 ? 0 : index / (tour.stops.length - 1);
+        lastSplineStopIndex = index;
+        if (immediate) {
+          applySpline(t);
+          emit('stopChange', index, tour.stops[index]);
+          return;
+        }
+        splineElapsed = t * (tour.splineDuration ?? 30);
+        applySpline(t);
+        setState('playing');
+        return;
+      }
       stopIndex = index;
       const stop = tour.stops[index];
       if (immediate) {
@@ -262,13 +332,15 @@ export function createCameraTourController(options) {
     /** 下一个漫游点 */
     next() {
       if (!tour?.stops?.length) return;
-      api.goToStop(Math.min(stopIndex + 1, tour.stops.length - 1));
+      const cur = tour.mode === 'spline' ? (lastSplineStopIndex >= 0 ? lastSplineStopIndex : 0) : stopIndex;
+      api.goToStop(Math.min(cur + 1, tour.stops.length - 1), tour.mode === 'spline');
     },
 
     /** 上一个漫游点 */
     prev() {
       if (!tour?.stops?.length) return;
-      api.goToStop(Math.max(stopIndex - 1, 0));
+      const cur = tour.mode === 'spline' ? (lastSplineStopIndex >= 0 ? lastSplineStopIndex : 0) : stopIndex;
+      api.goToStop(Math.max(cur - 1, 0), tour.mode === 'spline');
     },
 
     /**
@@ -278,6 +350,32 @@ export function createCameraTourController(options) {
     update(delta) {
       if (state !== 'playing' && state !== 'dwelling') return;
       if (!tour?.stops?.length) return;
+
+      if (tour.mode === 'spline') {
+        if (!splines) splines = buildSplines(tour);
+        if (!splines) return;
+        splineElapsed += delta;
+        const duration = tour.splineDuration ?? 30;
+        let linearT = splineElapsed / duration;
+        if (linearT >= 1) {
+          if (tour.loop) {
+            splineElapsed = 0;
+            linearT = 0;
+            lastSplineStopIndex = -1;
+          } else {
+            applySpline(1);
+            emitSplineStopAt(1);
+            api.stop();
+            emit('complete');
+            return;
+          }
+        }
+        const easedT = easeInOutCubic(linearT);
+        applySpline(easedT);
+        emitSplineStopAt(easedT);
+        return;
+      }
+
       const stop = tour.stops[stopIndex];
       if (!stop) return;
       phaseElapsed += delta;
@@ -305,9 +403,12 @@ export function createCameraTourController(options) {
     },
 
     getState: () => state,
-    getCurrentStopIndex: () => stopIndex,
-    /** 当前漫游点（含 name、position、target、dwellTime 等） */
-    getCurrentStop: () => tour?.stops?.[stopIndex] ?? null,
+    getCurrentStopIndex: () =>
+      tour?.mode === 'spline' ? (lastSplineStopIndex >= 0 ? lastSplineStopIndex : 0) : stopIndex,
+    getCurrentStop: () => {
+      const idx = tour?.mode === 'spline' ? (lastSplineStopIndex >= 0 ? lastSplineStopIndex : 0) : stopIndex;
+      return tour?.stops?.[idx] ?? null;
+    },
     getTour: () => tour,
     isActive: () => state === 'playing' || state === 'dwelling' || state === 'paused',
 

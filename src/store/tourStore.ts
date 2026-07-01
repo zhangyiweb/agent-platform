@@ -6,6 +6,8 @@ import {
   createTourId,
   DEFAULT_DWELL_TIME,
   DEFAULT_TRANSITION_TIME,
+  DEFAULT_SPLINE_DURATION,
+  type CameraTourMode,
 } from '@/types/cameraTour';
 
 interface TourStore {
@@ -20,6 +22,8 @@ interface TourStore {
   removeTour: (id: string) => void;
   renameTour: (id: string, name: string) => void;
   setTourLoop: (id: string, loop: boolean) => void;
+  setTourMode: (id: string, mode: CameraTourMode) => void;
+  setSplineDuration: (id: string, duration: number) => void;
 
   addStop: (tourId: string, stop: Omit<CameraTourStop, 'id'>) => void;
   updateStop: (tourId: string, stopId: string, updates: Partial<CameraTourStop>) => void;
@@ -52,7 +56,9 @@ export const useTourStore = create<TourStore>((set, get) => ({
     const tour: CameraTour = {
       id,
       name: name || `漫游路线 ${get().tours.length + 1}`,
+      mode: 'stop',
       loop: false,
+      splineDuration: DEFAULT_SPLINE_DURATION,
       stops: [],
     };
     set((state) => ({
@@ -72,7 +78,9 @@ export const useTourStore = create<TourStore>((set, get) => ({
             {
               ...tour,
               name: '默认漫游',
+              mode: 'stop',
               loop: false,
+              splineDuration: DEFAULT_SPLINE_DURATION,
               stops: [],
             },
           ],
@@ -93,6 +101,26 @@ export const useTourStore = create<TourStore>((set, get) => ({
   setTourLoop: (id, loop) =>
     set((state) => ({
       tours: state.tours.map((t) => (t.id === id ? { ...t, loop } : t)),
+    })),
+
+  setTourMode: (id, mode) =>
+    set((state) => ({
+      tours: state.tours.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              mode,
+              splineDuration: t.splineDuration ?? DEFAULT_SPLINE_DURATION,
+            }
+          : t
+      ),
+    })),
+
+  setSplineDuration: (id, duration) =>
+    set((state) => ({
+      tours: state.tours.map((t) =>
+        t.id === id ? { ...t, splineDuration: Math.max(1, duration) } : t
+      ),
     })),
 
   addStop: (tourId, stop) =>
@@ -171,7 +199,9 @@ export const useTourStore = create<TourStore>((set, get) => ({
           {
             id,
             name: '默认漫游',
+            mode: 'stop',
             loop: false,
+            splineDuration: DEFAULT_SPLINE_DURATION,
             stops: [],
           },
         ],
