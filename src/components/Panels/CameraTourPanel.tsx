@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { Button, Input, Select, Switch, Typography, Modal, message } from 'antd';
+import { Button, Input, Select, Switch, Typography, Modal, App } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -282,6 +282,7 @@ function StopCard({
 }
 
 export function CameraTourPanel() {
+  const { message } = App.useApp();
   const {
     tours,
     activeTourId,

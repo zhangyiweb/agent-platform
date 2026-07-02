@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { App as AntApp } from 'antd'
 import { useSceneStore } from '@/store/sceneStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useLightStore } from '@/store/lightStore'
@@ -115,6 +116,7 @@ function App() {
     : null;
 
   return (
+    <AntApp>
     <div className="app-container">
       {/* 顶部工具栏 */}
       <Toolbar />
@@ -165,6 +167,7 @@ function App() {
       {/* Gizmo工具栏 - 固定在屏幕下方 */}
       <GizmoToolbar />
     </div>
+    </AntApp>
   )
 }
 

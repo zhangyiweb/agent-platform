@@ -84,6 +84,7 @@ export function buildMainJs(hasCameraTour = false): string {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { createPostProcessPipeline, normalizePostProcessConfig } from './postProcess.js';
 ${hasCameraTour ? "import { createCameraTourController } from './cameraTour.js';\n" : ''}
 
 const canvas = document.getElementById('canvas');
@@ -343,6 +344,11 @@ async function bootstrap() {
   const timer = new THREE.Timer();
   timer.connect(document);
 
+  const postProcessConfig = normalizePostProcessConfig(config.postProcess);
+  let postPipeline = postProcessConfig
+    ? createPostProcessPipeline(renderer, scene, camera, postProcessConfig)
+    : null;
+
   ${hasCameraTour ? `// 相机漫游工具包（详见 js/cameraTour.js、docs/camera-tour-guide.md）
   let cameraTour = null;
   try {
@@ -377,7 +383,11 @@ async function bootstrap() {
     } else {
       controls.update();
     }` : 'controls.update();'}
-    renderer.render(scene, camera);
+    if (postPipeline) {
+      postPipeline.render();
+    } else {
+      renderer.render(scene, camera);
+    }
   }
   animate();
 
@@ -385,6 +395,7 @@ async function bootstrap() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    postPipeline?.setSize(window.innerWidth, window.innerHeight);
   });
 
   hideLoading();
@@ -452,7 +463,7 @@ python -m http.server 8080
   - \`waypoints[]\` 含漫游点名称、相机坐标、目标点；\`route.curveSamples\` 为曲线采样（spline 模式）。
   - 加载后控制台执行 \`window.cameraTour.play()\` 试播；完整 API 见 \`js/cameraTour.js\` 顶部注释与 \`docs/camera-tour-guide.md\`。
   - 切换路线：\`await window.cameraTour.loadConfig('./config/camera-tours/路线id.json')\`
-- **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存了编辑器中的后期参数，\`main.js\` 未内置完整后期管线，可按需接入 EffectComposer。
+- **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存编辑器后期参数，\`js/postProcess.js\` 与 \`main.js\` 已自动接入 EffectComposer。
 
 ## 依赖
 

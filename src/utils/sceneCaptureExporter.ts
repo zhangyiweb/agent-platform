@@ -9,15 +9,21 @@ import { getSplineDuration } from '@/utils/cameraTourSpline';
 import {
   lockSceneCaptureVisuals,
   removeTourPathVisual,
+  resetSceneCaptureVisualsLock,
   stripTourPathVisualForRender,
   syncTourPathVisual,
-  unlockSceneCaptureVisuals,
 } from '@/utils/cameraTourVisual';
 import { useTourStore } from '@/store/tourStore';
 import {
   hideEditorHelpersForCapture,
   restoreEditorHelpersAfterCapture,
+  syncEditorGridAxesVisibility,
 } from '@/utils/sceneUtils';
+import {
+  createPostProcessPipeline,
+  getEditorPostProcessConfig,
+  type PostProcessPipeline,
+} from '@/utils/postProcessComposer';
 
 export interface CaptureScreenshotOptions {
   width?: number;
@@ -105,16 +111,11 @@ function createCaptureRenderer(
   return renderer;
 }
 
-function renderCaptureFrame(
+function applyCaptureClearColor(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
-  camera: THREE.PerspectiveCamera,
-  transparent: boolean,
-  stripTourVisuals = false
+  transparent: boolean
 ) {
-  if (stripTourVisuals) {
-    stripTourPathVisualForRender(scene);
-  }
   if (transparent) {
     renderer.setClearColor(0x000000, 0);
   } else if (scene.background instanceof THREE.Color) {
@@ -122,7 +123,60 @@ function renderCaptureFrame(
   } else {
     renderer.setClearColor(0x1a1a1a, 1);
   }
-  renderer.render(scene, camera);
+}
+
+interface CaptureRenderContext {
+  renderer: THREE.WebGLRenderer;
+  postPipeline: PostProcessPipeline | null;
+  renderFrame: (
+    scene: THREE.Scene,
+    camera: THREE.PerspectiveCamera,
+    transparent: boolean,
+    stripTourVisuals?: boolean
+  ) => void;
+  dispose: () => void;
+}
+
+function createCaptureRenderContext(
+  sourceRenderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  width: number,
+  height: number,
+  transparent: boolean
+): CaptureRenderContext {
+  const renderer = createCaptureRenderer(sourceRenderer, width, height, transparent);
+  const postConfig = getEditorPostProcessConfig();
+  const postPipeline =
+    postConfig && postConfig.effect
+      ? createPostProcessPipeline(renderer, scene, camera, String(postConfig.effect), postConfig)
+      : null;
+
+  if (postPipeline) {
+    postPipeline.setSize(width, height);
+  }
+
+  return {
+    renderer,
+    postPipeline,
+    renderFrame(sceneToRender, cameraToRender, transparentFlag, stripTourVisuals = false) {
+      if (stripTourVisuals) {
+        stripTourPathVisualForRender(sceneToRender);
+      }
+      applyCaptureClearColor(renderer, sceneToRender, transparentFlag);
+
+      if (postPipeline && postConfig) {
+        postPipeline.updateConfig(postConfig);
+        postPipeline.render();
+      } else {
+        renderer.render(sceneToRender, cameraToRender);
+      }
+    },
+    dispose() {
+      postPipeline?.dispose();
+      renderer.dispose();
+    },
+  };
 }
 
 function createTourRecordControls(camera: THREE.PerspectiveCamera, target: THREE.Vector3) {
@@ -329,6 +383,51 @@ async function encodeVideoFromCanvas(
   return new Blob([getBuffer()], { type: mimeType });
 }
 
+interface SceneCaptureFinalizeParams {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  helperSnapshot: Map<THREE.Object3D, boolean>;
+  prevBg: THREE.Color | THREE.Texture | null;
+  prevAspect: number;
+  tour?: CameraTour | null;
+  captureContext?: CaptureRenderContext | null;
+  player?: CameraTourPlayer | null;
+}
+
+/** 无论录制/截图成功与否，都必须执行以恢复编辑器辅助显示 */
+function finalizeSceneCapture({
+  scene,
+  camera,
+  helperSnapshot,
+  prevBg,
+  prevAspect,
+  tour,
+  captureContext,
+  player,
+}: SceneCaptureFinalizeParams) {
+  try {
+    player?.stop();
+  } catch {
+    // 忽略播放器停止异常，确保后续恢复逻辑继续执行
+  }
+
+  scene.background = prevBg;
+  camera.aspect = prevAspect;
+  camera.updateProjectionMatrix();
+  restoreEditorHelpersAfterCapture(helperSnapshot);
+  syncEditorGridAxesVisibility(scene);
+  resetSceneCaptureVisualsLock();
+
+  const tourToSync = tour ?? useTourStore.getState().getActiveTour();
+  syncTourPathVisual(scene, tourToSync ? normalizeCameraTour(tourToSync) : null);
+
+  try {
+    captureContext?.dispose();
+  } catch {
+    // 忽略 dispose 异常
+  }
+}
+
 /** 自定义分辨率截图（支持透明背景） */
 export async function captureScreenshot(options: CaptureScreenshotOptions = {}): Promise<void> {
   const ctx = getEditorCaptureContext();
@@ -341,32 +440,38 @@ export async function captureScreenshot(options: CaptureScreenshotOptions = {}):
 
   const prevAspect = camera.aspect;
   const prevBg = scene.background;
+  const tourForRestore = useTourStore.getState().getActiveTour();
   const helperSnapshot = hideEditorHelpersForCapture(scene);
   lockSceneCaptureVisuals();
   removeTourPathVisual(scene);
-  const tourForRestore = useTourStore.getState().getActiveTour();
-  const captureRenderer = createCaptureRenderer(sourceRenderer, width, height, transparent);
 
-  if (transparent) {
-    scene.background = null;
-  }
-
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
+  let captureContext: CaptureRenderContext | null = null;
 
   try {
-    renderCaptureFrame(captureRenderer, scene, camera, transparent, true);
+    captureContext = createCaptureRenderContext(sourceRenderer, scene, camera, width, height, transparent);
+    const captureRenderer = captureContext.renderer;
+
+    if (transparent) {
+      scene.background = null;
+    }
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+
+    captureContext.renderFrame(scene, camera, transparent, true);
     const blob = await canvasToBlob(captureRenderer.domElement);
     const suffix = transparent ? 'transparent' : 'screenshot';
     downloadBlob(blob, options.filename ?? `${suffix}_${width}x${height}_${Date.now()}.png`);
   } finally {
-    scene.background = prevBg;
-    camera.aspect = prevAspect;
-    camera.updateProjectionMatrix();
-    restoreEditorHelpersAfterCapture(helperSnapshot);
-    unlockSceneCaptureVisuals();
-    if (tourForRestore) syncTourPathVisual(scene, tourForRestore);
-    captureRenderer.dispose();
+    finalizeSceneCapture({
+      scene,
+      camera,
+      helperSnapshot,
+      prevBg,
+      prevAspect,
+      tour: tourForRestore,
+      captureContext,
+    });
   }
 }
 
@@ -398,34 +503,39 @@ export async function recordCameraTour(options: RecordTourOptions): Promise<void
   lockSceneCaptureVisuals();
   removeTourPathVisual(scene);
 
-  const captureRenderer = createCaptureRenderer(sourceRenderer, width, height, transparent);
-  const recordCamera = new THREE.PerspectiveCamera(
-    camera.fov,
-    width / height,
-    camera.near,
-    camera.far
-  );
-  recordCamera.position.copy(camera.position);
-  recordCamera.rotation.copy(camera.rotation);
-
-  const controlsTarget = new THREE.Vector3();
-  const controls = createTourRecordControls(recordCamera, controlsTarget);
-  const player = new CameraTourPlayer(recordCamera, controls, tour, {});
-
-  player.playFromTourStart();
-
-  if (transparent) {
-    scene.background = null;
-  }
-
-  const renderTourFrame = (frameIndex: number): boolean => {
-    if (player.getState() === 'idle' && frameIndex > 0) return false;
-    if (frameIndex > 0) player.update(1 / fps);
-    renderCaptureFrame(captureRenderer, scene, recordCamera, transparent, true);
-    return true;
-  };
+  let captureContext: CaptureRenderContext | null = null;
+  let player: CameraTourPlayer | null = null;
 
   try {
+    const recordCamera = new THREE.PerspectiveCamera(
+      camera.fov,
+      width / height,
+      camera.near,
+      camera.far
+    );
+    recordCamera.position.copy(camera.position);
+    recordCamera.rotation.copy(camera.rotation);
+
+    const controlsTarget = new THREE.Vector3();
+    const controls = createTourRecordControls(recordCamera, controlsTarget);
+    player = new CameraTourPlayer(recordCamera, controls, tour, {});
+
+    captureContext = createCaptureRenderContext(sourceRenderer, scene, recordCamera, width, height, transparent);
+    const captureRenderer = captureContext.renderer;
+
+    player.playFromTourStart();
+
+    if (transparent) {
+      scene.background = null;
+    }
+
+    const renderTourFrame = (frameIndex: number): boolean => {
+      if (player!.getState() === 'idle' && frameIndex > 0) return false;
+      if (frameIndex > 0) player!.update(1 / fps);
+      captureContext!.renderFrame(scene, recordCamera, transparent, true);
+      return true;
+    };
+
     if (options.format === 'frames') {
       const frames: Blob[] = [];
 
@@ -470,13 +580,15 @@ export async function recordCameraTour(options: RecordTourOptions): Promise<void
     const ext = container === 'mp4' ? 'mp4' : 'webm';
     downloadBlob(videoBlob, `camera-tour_${width}x${height}_${Date.now()}.${ext}`);
   } finally {
-    player.stop();
-    scene.background = prevBg;
-    camera.aspect = prevAspect;
-    camera.updateProjectionMatrix();
-    restoreEditorHelpersAfterCapture(helperSnapshot);
-    unlockSceneCaptureVisuals();
-    syncTourPathVisual(scene, tour);
-    captureRenderer.dispose();
+    finalizeSceneCapture({
+      scene,
+      camera,
+      helperSnapshot,
+      prevBg,
+      prevAspect,
+      tour,
+      captureContext,
+      player,
+    });
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { useSceneStore } from '@/store/sceneStore';
+import { useEditorStore } from '@/store/editorStore';
 
 /** 根据业务 ID / UUID 在场景中查找 Three.js 对象 */
 export function findThreeObjectById(
@@ -74,6 +75,15 @@ export function restoreEditorHelpersAfterCapture(snapshot: Map<THREE.Object3D, b
   snapshot.forEach((visible, obj) => {
     obj.visible = visible;
   });
+}
+
+/** 按全局设置恢复网格与坐标轴可见性（录制失败后兜底） */
+export function syncEditorGridAxesVisibility(scene: THREE.Scene) {
+  const { gridVisible, axesVisible } = useEditorStore.getState();
+  const grid = scene.getObjectByName('grid');
+  const axes = scene.getObjectByName('axes');
+  if (grid) grid.visible = gridVisible;
+  if (axes) axes.visible = axesVisible;
 }
 
 /** 创建用于导出的场景副本（仅模型，不含灯光与辅助对象） */

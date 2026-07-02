@@ -17,6 +17,11 @@ export function unlockSceneCaptureVisuals() {
   sceneCaptureLockCount = Math.max(0, sceneCaptureLockCount - 1);
 }
 
+/** 强制释放截图/录制锁（录制异常时防止辅助线无法恢复） */
+export function resetSceneCaptureVisualsLock() {
+  sceneCaptureLockCount = 0;
+}
+
 export function isSceneCaptureVisualsLocked(): boolean {
   return sceneCaptureLockCount > 0;
 }

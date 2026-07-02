@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react';
-import { Button, Checkbox, ConfigProvider, InputNumber, message, Progress, Select } from 'antd';
+import { Button, Checkbox, ConfigProvider, InputNumber, App, Progress, Select } from 'antd';
 import * as THREE from 'three';
 import { useSceneExporter } from '@/hooks/useSceneExporter';
 import { downloadSceneConfig } from '@/utils/sceneConfigExporter';
@@ -215,6 +215,7 @@ function TileButton({
 }
 
 export function ExportPanel({ onClose }: ExportPanelProps) {
+  const { message } = App.useApp();
   const { exportGLB } = useSceneExporter();
   const { tours, activeTourId } = useTourStore();
   const [exporting, setExporting] = useState(false);
