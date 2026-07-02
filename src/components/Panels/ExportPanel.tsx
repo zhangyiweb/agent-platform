@@ -63,6 +63,7 @@ const THEMES = {
 } satisfies Record<string, TileTheme>;
 
 const EXPORT_SELECT_CLASS = 'export-panel-select';
+const exportSelectClassNames = { popup: { root: 'export-panel-select-popup' } };
 
 const exportFormTheme = {
   components: {
@@ -540,7 +541,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
                 <Select
                   size="small"
                   className={`${EXPORT_SELECT_CLASS} w-full`}
-                  popupClassName="export-panel-select-popup"
+                  classNames={exportSelectClassNames}
                   value={selectedTourId || undefined}
                   onChange={setSelectedTourId}
                   disabled={exportableTours.length === 0}
@@ -556,7 +557,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
                 <Select
                   size="small"
                   className={`${EXPORT_SELECT_CLASS} w-full`}
-                  popupClassName="export-panel-select-popup"
+                  classNames={exportSelectClassNames}
                   value={recordResolutionPreset}
                   onChange={handleRecordResolutionPresetChange}
                   options={recordResolutionOptions}
@@ -606,7 +607,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
                   <Select
                     size="small"
                     className={`${EXPORT_SELECT_CLASS} w-full`}
-                    popupClassName="export-panel-select-popup"
+                    classNames={exportSelectClassNames}
                     value={recordFormat}
                     onChange={(v) => setRecordFormat(v)}
                     options={[
