@@ -6,8 +6,6 @@ export type ParticlePresetId =
   | 'sparks'
   | 'dust'
   | 'magic'
-  | 'rain'
-  | 'snow'
   | 'explosion'
   | 'mist'
   | 'bubbles'
@@ -22,7 +20,7 @@ export type ParticleEmitShape = 'point' | 'sphere' | 'box' | 'cone';
 export type ParticleBlendMode = 'normal' | 'additive';
 
 /** 粒子贴图类型 */
-export type ParticleTextureKind = 'soft' | 'smoke' | 'spark' | 'rain' | 'custom';
+export type ParticleTextureKind = 'soft' | 'smoke' | 'spark' | 'custom';
 
 /** 粒子发射器配置 */
 export interface ParticleEmitterConfig {
@@ -42,7 +40,7 @@ export interface ParticleEmitterConfig {
   /** 局部空间发射方向 */
   direction: [number, number, number];
   emitShape: ParticleEmitShape;
-  /** 发射区域尺寸 [宽, 高, 深] */
+  /** 发射区域尺寸，含义随 emitShape 变化，见 getParticleEmitSizeMeta */
   emitSize: [number, number, number];
   colorStart: string;
   colorEnd: string;

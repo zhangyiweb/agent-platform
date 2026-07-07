@@ -97,26 +97,6 @@ function buildSparkTexture(): THREE.Texture {
   return tex;
 }
 
-/** 雨滴拉伸纹理（极细线，供手动选用） */
-function buildRainTexture(): THREE.Texture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 64;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建 Canvas 2D 上下文');
-  const g = ctx.createLinearGradient(16, 0, 16, 64);
-  g.addColorStop(0, 'rgba(220,230,240,0)');
-  g.addColorStop(0.2, 'rgba(220,230,240,0.55)');
-  g.addColorStop(0.8, 'rgba(200,215,230,0.45)');
-  g.addColorStop(1, 'rgba(200,215,230,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(14.5, 0, 3, 64);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
 /** 获取粒子贴图（带缓存） */
 export function getParticleTexture(kind: ParticleTextureKind): THREE.Texture {
   const cached = textureCache.get(kind);
@@ -129,9 +109,6 @@ export function getParticleTexture(kind: ParticleTextureKind): THREE.Texture {
       break;
     case 'spark':
       tex = buildSparkTexture();
-      break;
-    case 'rain':
-      tex = buildRainTexture();
       break;
     case 'custom':
       tex = buildSoftTexture();

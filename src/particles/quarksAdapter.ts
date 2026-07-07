@@ -24,6 +24,7 @@ import {
   type ParticleSystemJSONParameters,
 } from 'three.quarks';
 import type { ParticleEmitterConfig, ParticleEmitShape, ParticlePresetId } from '@/types/particle';
+import { isFallingWeatherPreset } from '@/particles/particleEmitMeta';
 import { resolveParticleTexture } from '@/particles/particleTextures';
 
 export interface QuarksParticleEntry {
@@ -36,11 +37,8 @@ const EMIT_AXIS = new THREE.Vector3(0, 0, 1);
 const _dir = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 
-/** 水平铺开发射面、粒子向下落的天气类预设 */
-const FALLING_WEATHER_PRESETS: ParticlePresetId[] = ['rain', 'snow', 'confetti'];
-
-function isFallingWeatherPreset(config: ParticleEmitterConfig) {
-  return FALLING_WEATHER_PRESETS.includes(config.preset);
+function isFallingWeatherConfig(config: ParticleEmitterConfig) {
+  return isFallingWeatherPreset(config.preset);
 }
 
 function hexToVec3(hex: string): Vector3 {
@@ -52,24 +50,25 @@ function createEmitterShape(config: ParticleEmitterConfig) {
   const [sx, , sz] = config.emitSize;
 
   switch (config.emitShape as ParticleEmitShape) {
-    case 'sphere':
-      return new SphereEmitter({
-        radius: Math.max(sx, sz) * 0.5,
-        thickness: 1,
-      });
-    case 'cone':
+    case 'sphere': {
+      const radius = Math.max(sx, sz, 0.1) * 0.5;
+      return new SphereEmitter({ radius, thickness: 1 });
+    }
+    case 'cone': {
+      const radius = Math.max(sx, sz, 0.1) * 0.5;
       return new ConeEmitter({
-        radius: Math.max(sx, sz) * 0.5,
+        radius,
         angle: Math.max(0.05, config.spread),
       });
+    }
     case 'box': {
       const width = Math.max(sx, 0.5);
-      const height = Math.max(sz, 0.5);
+      const depth = Math.max(sz, 0.5);
       return new GridEmitter({
         width,
-        height,
-        column: Math.max(12, Math.round(width * 1.5)),
-        row: Math.max(12, Math.round(height * 1.5)),
+        height: depth,
+        column: Math.max(16, Math.round(width * 2)),
+        row: Math.max(16, Math.round(depth * 2)),
       });
     }
     default:
@@ -139,13 +138,19 @@ function buildBehaviors(config: ParticleEmitterConfig): Behavior[] {
 function applyEmitterLayout(emitter: THREE.Object3D, config: ParticleEmitterConfig) {
   emitter.rotation.set(0, 0, 0);
 
-  if (isFallingWeatherPreset(config)) {
-    // GridEmitter 沿局部 +Z 发射；绕 X 轴 +90° 使速度对齐世界 -Y（向下落）
-    emitter.rotation.x = Math.PI / 2;
+  if (isFallingWeatherConfig(config)) {
+    alignEmitterDirection(emitter, [0, -1, 0]);
     return;
   }
 
   alignEmitterDirection(emitter, config.direction);
+}
+
+function getRenderSettings() {
+  return {
+    renderMode: RenderMode.BillBoard,
+    rendererEmitterSettings: {},
+  };
 }
 
 /** 将编辑器配置转为 three.quarks ParticleSystem */
@@ -156,10 +161,11 @@ export function buildQuarksParticleSystem(config: ParticleEmitterConfig): Partic
   }
 
   const material = createParticleMaterial(config);
-  const fallingWeather = isFallingWeatherPreset(config);
+  const fallingWeather = isFallingWeatherConfig(config);
+  const renderSettings = getRenderSettings();
 
   const system = new ParticleSystem({
-    duration: config.duration > 0 ? config.duration : 5,
+    duration: config.duration > 0 ? config.duration : 30,
     looping: config.loop,
     prewarm: true,
     shape: createEmitterShape(config),
@@ -170,14 +176,15 @@ export function buildQuarksParticleSystem(config: ParticleEmitterConfig): Partic
     emissionOverTime: new ConstantValue(config.enabled ? config.emissionRate : 0),
     worldSpace: fallingWeather,
     softParticles: false,
-    renderMode: RenderMode.BillBoard,
-    rendererEmitterSettings: {},
+    renderMode: renderSettings.renderMode,
+    rendererEmitterSettings: renderSettings.rendererEmitterSettings,
     material,
     behaviors: buildBehaviors(config),
   });
 
-  system.restart();
+  // 必须先设置发射器朝向，再 restart/prewarm，否则预热粒子方向错误
   applyEmitterLayout(system.emitter, config);
+  system.restart();
   return system;
 }
 
@@ -233,12 +240,20 @@ export function createEmitHelper(config: ParticleEmitterConfig): THREE.LineSegme
   if (!config.showHelper) return null;
 
   const [sx, sy, sz] = config.emitSize;
-  const geo =
-    config.emitShape === 'sphere'
-      ? new THREE.WireframeGeometry(
-          new THREE.SphereGeometry(Math.max(sx, sy, sz) * 0.5, 12, 8)
-        )
-      : new THREE.EdgesGeometry(new THREE.BoxGeometry(sx, sy, sz));
+  let geo: THREE.BufferGeometry;
+
+  if (config.emitShape === 'sphere') {
+    geo = new THREE.WireframeGeometry(
+      new THREE.SphereGeometry(Math.max(sx, sy, sz) * 0.5, 12, 8)
+    );
+  } else if (config.emitShape === 'box' && isFallingWeatherConfig(config)) {
+    // 与 GridEmitter 一致：局部 XY 平面为发射面
+    geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(sx, sz, 0.1));
+  } else if (config.emitShape === 'box') {
+    geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(sx, sz, Math.max(sy, 0.1)));
+  } else {
+    geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(sx, sy, sz));
+  }
 
   const helper = new THREE.LineSegments(
     geo,
@@ -319,11 +334,8 @@ export function exportParticleConfigJson(config: ParticleEmitterConfig): string 
 /** 根据预设返回建议的初始位置 */
 export function getParticleSpawnTransform(presetId: ParticlePresetId): [number, number, number] {
   switch (presetId) {
-    case 'rain':
     case 'confetti':
-      return [0, 14, 0];
-    case 'snow':
-      return [0, 12, 0];
+      return [0, 16, 0];
     case 'mist':
       return [0, 0.3, 0];
     default:

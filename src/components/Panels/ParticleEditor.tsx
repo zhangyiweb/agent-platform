@@ -8,6 +8,7 @@ import {
   parseCustomParticleJson,
 } from '@/particles/quarksAdapter';
 import type { ParticleEmitterConfig } from '@/types/particle';
+import { getParticleEmitSizeMeta } from '@/particles/particleEmitMeta';
 
 interface ParticleEditorProps {
   objectId: string;
@@ -49,6 +50,7 @@ export function ParticleEditor({ objectId }: ParticleEditorProps) {
   const stored = useParticleStore((s) => s.emitters[objectId]);
   const config = stored ?? DEFAULT_PARTICLE_CONFIG;
   const [jsonDraft, setJsonDraft] = useState('');
+  const emitMeta = getParticleEmitSizeMeta(config.emitShape, config.preset);
 
   const update = (updates: Partial<ParticleEmitterConfig>) => {
     const next = { ...config, ...updates };
@@ -113,7 +115,7 @@ export function ParticleEditor({ objectId }: ParticleEditorProps) {
           value={config.maxParticles}
           step={50}
           min={50}
-          max={5000}
+          max={15000}
           onChange={(v) => update({ maxParticles: Math.round(v) })}
         />
         <NumberField
@@ -176,46 +178,72 @@ export function ParticleEditor({ objectId }: ParticleEditorProps) {
         >
           <option value="point">点</option>
           <option value="sphere">球体</option>
-          <option value="box">盒子</option>
+          <option value="box">平面网格</option>
           <option value="cone">锥形</option>
         </select>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <NumberField
-          label="区域 X"
-          value={config.emitSize[0]}
-          step={0.1}
-          min={0.01}
-          onChange={(v) => {
-            const s = [...config.emitSize] as [number, number, number];
-            s[0] = v;
-            update({ emitSize: s });
-          }}
-        />
-        <NumberField
-          label="区域 Y"
-          value={config.emitSize[1]}
-          step={0.1}
-          min={0.01}
-          onChange={(v) => {
-            const s = [...config.emitSize] as [number, number, number];
-            s[1] = v;
-            update({ emitSize: s });
-          }}
-        />
-        <NumberField
-          label="区域 Z"
-          value={config.emitSize[2]}
-          step={0.1}
-          min={0.01}
-          onChange={(v) => {
-            const s = [...config.emitSize] as [number, number, number];
-            s[2] = v;
-            update({ emitSize: s });
-          }}
-        />
-      </div>
+      {(config.emitShape !== 'point') && (
+        <div>
+          <p className="text-[10px] text-gray-500 mb-1.5">{emitMeta.note}</p>
+          <div className={`grid gap-2 ${emitMeta.showY ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <NumberField
+              label={emitMeta.x}
+              value={config.emitSize[0]}
+              step={0.5}
+              min={0.1}
+              onChange={(v) => {
+                const s = [...config.emitSize] as [number, number, number];
+                s[0] = v;
+                if (config.emitShape === 'sphere' || config.emitShape === 'cone') {
+                  s[1] = v;
+                  s[2] = v;
+                }
+                update({ emitSize: s });
+              }}
+            />
+            {emitMeta.showY && (
+              <NumberField
+                label={emitMeta.y}
+                value={config.emitSize[1]}
+                step={0.1}
+                min={0.01}
+                onChange={(v) => {
+                  const s = [...config.emitSize] as [number, number, number];
+                  s[1] = v;
+                  update({ emitSize: s });
+                }}
+              />
+            )}
+            {!emitMeta.showY && config.emitShape === 'box' && (
+              <NumberField
+                label={emitMeta.z}
+                value={config.emitSize[2]}
+                step={0.5}
+                min={0.1}
+                onChange={(v) => {
+                  const s = [...config.emitSize] as [number, number, number];
+                  s[2] = v;
+                  update({ emitSize: s });
+                }}
+              />
+            )}
+            {emitMeta.showY && (
+              <NumberField
+                label={emitMeta.z}
+                value={config.emitSize[2]}
+                step={0.1}
+                min={0.01}
+                onChange={(v) => {
+                  const s = [...config.emitSize] as [number, number, number];
+                  s[2] = v;
+                  update({ emitSize: s });
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -332,13 +360,12 @@ export function ParticleEditor({ objectId }: ParticleEditorProps) {
             <option value="smoke">烟雾团块</option>
             <option value="soft">柔和光斑</option>
             <option value="spark">火花星芒</option>
-            <option value="rain">雨滴拉伸</option>
             <option value="custom">自定义贴图</option>
           </select>
         </div>
       </div>
       <p className="text-[10px] text-gray-500 -mt-2">
-        下拉选项全局相同，但每个发射器会独立保存当前选中的混合模式与贴图。
+        混合模式与贴图的可选项列表相同，但<strong className="text-gray-400">每个发射器各自保存</strong>当前选中值，互不影响。
       </p>
 
       {config.texture === 'custom' && (
