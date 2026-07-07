@@ -2,7 +2,7 @@
 export interface SceneObject {
   id: string;
   name: string;
-  type: 'mesh' | 'light' | 'camera' | 'group';
+  type: 'mesh' | 'light' | 'camera' | 'group' | 'particle';
   visible: boolean;
   position: [number, number, number];
   rotation: [number, number, number];

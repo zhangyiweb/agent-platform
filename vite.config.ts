@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
+      dedupe: ['three'],
     },
     server: {
       port: 5173,

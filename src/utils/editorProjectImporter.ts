@@ -8,6 +8,8 @@ import type { SceneObject } from '@/types/scene';
 import type { LightConfig } from '@/types/light';
 import type { CameraTour } from '@/types/cameraTour';
 import type { TextureUvAnimationConfig } from '@/types/textureAnimation';
+import type { ParticleEmitterConfig } from '@/types/particle';
+import { restoreParticleEmitters } from '@/utils/particleScene';
 import type { ExportedTextureUvState } from '@/utils/textureUvUtils';
 import { clearEditorScene } from '@/utils/clearEditorScene';
 import { restoreEditorObjectIds } from '@/utils/exportSceneRestore';
@@ -34,6 +36,7 @@ type ProjectConfig = ExportedSceneConfig & {
     cameraTours?: CameraTour[];
     activeCameraTourId?: string | null;
     textureUvAnimations?: Record<string, TextureUvAnimationConfig>;
+    particles?: Record<string, ParticleEmitterConfig>;
   };
 };
 
@@ -305,6 +308,7 @@ async function restoreProjectConfig(
   const editorLights = (config.editor.lights ?? []) as LightConfig[];
   const textureUvStates = config.editor.textureUvStates ?? {};
   const textureUvAnimations = config.editor.textureUvAnimations ?? {};
+  const particles = config.editor.particles ?? {};
   const cameraTours = config.editor.cameraTours ?? [];
   const activeCameraTourId = config.editor.activeCameraTourId ?? null;
 
@@ -328,8 +332,16 @@ async function restoreProjectConfig(
     }
   }
 
-  registerEditorObjects(editorObjects, modelRoot);
+  registerEditorObjects(
+    editorObjects.filter((o) => o.type !== 'particle'),
+    modelRoot
+  );
   syncStoreFromLoadedObjects();
+
+  const particleObjects = editorObjects.filter((o) => o.type === 'particle');
+  if (particleObjects.length > 0) {
+    restoreParticleEmitters(scene, particles, particleObjects);
+  }
 
   if (Object.keys(textureUvStates).length > 0) {
     applyTextureUvStates(

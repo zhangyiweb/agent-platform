@@ -4,6 +4,7 @@ import { useLightStore } from '@/store/lightStore';
 import * as THREE from 'three';
 import { MaterialEditor } from './MaterialEditor';
 import { GlobalSettings } from './GlobalSettings';
+import { ParticleEditor } from './ParticleEditor';
 
 export function PropertyPanel() {
   const { selectedIds, objects, updateObject, getThreeObject } = useSceneStore();
@@ -591,6 +592,71 @@ export function PropertyPanel() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  const isParticle = selectedObject?.type === 'particle';
+
+  // 选中粒子发射器
+  if (isParticle && selectedObject) {
+    return (
+      <div className="h-full flex flex-col bg-gray-900">
+        <div className="flex border-b border-gray-700">
+          <button
+            onClick={() => setActiveTab('details')}
+            className={`flex-1 py-2 text-xs font-semibold transition-colors ${
+              activeTab === 'details'
+                ? 'text-white border-b-2 border-blue-500 bg-gray-700'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            详情
+          </button>
+          <button
+            onClick={() => setActiveTab('material')}
+            className={`flex-1 py-2 text-xs font-semibold transition-colors ${
+              activeTab === 'material'
+                ? 'text-white border-b-2 border-blue-500 bg-gray-700'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            粒子
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === 'details' && (
+            <div className="p-3 space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">名称</label>
+                <input
+                  type="text"
+                  className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
+                  value={selectedObject.name}
+                  onChange={(e) => updateObject(selectedObject.id, { name: e.target.value })}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-400">可见</span>
+                <button
+                  type="button"
+                  onClick={handleVisibilityToggle}
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    objectVisible ? 'bg-green-500' : 'bg-gray-600'
+                  }`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full transform transition-transform ${
+                      objectVisible ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+          {activeTab === 'material' && <ParticleEditor objectId={selectedObject.id} />}
         </div>
       </div>
     );

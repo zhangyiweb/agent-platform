@@ -6,6 +6,7 @@ import {
 } from '@/config/exportDefaults';
 
 const THREE_VERSION = '0.184.0';
+const QUARKS_VERSION = '0.17.1';
 
 export function buildIndexHtml(title: string): string {
   return `<!DOCTYPE html>
@@ -20,6 +21,7 @@ export function buildIndexHtml(title: string): string {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/",
+      "three.quarks": "https://unpkg.com/three.quarks@${QUARKS_VERSION}/dist/three.quarks.esm.js",
       "postprocessing": "https://unpkg.com/postprocessing@6.38.2/build/index.js"
     }
   }
@@ -85,6 +87,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { createPostProcessPipeline, normalizePostProcessConfig } from './postProcess.js';
+import { createParticleEmitters, tickParticleEmitters } from './particleRuntime.js';
 ${hasCameraTour ? "import { createCameraTourController } from './cameraTour.js';\n" : ''}
 
 const canvas = document.getElementById('canvas');
@@ -341,6 +344,11 @@ async function bootstrap() {
   }
 
   const textureUvAnimations = config.editor?.textureUvAnimations || {};
+  const particleSystems = createParticleEmitters(
+    scene,
+    config.editor?.objects || [],
+    config.editor?.particles || {}
+  );
   const timer = new THREE.Timer();
   timer.connect(document);
 
@@ -378,6 +386,7 @@ async function bootstrap() {
     timer.update();
     const delta = timer.getDelta();
     tickTextureUvAnimations(scene, textureUvAnimations, delta);
+    tickParticleEmitters(particleSystems, delta);
     ${hasCameraTour ? `if (cameraTour?.isActive()) {
       cameraTour.update(delta);
     } else {

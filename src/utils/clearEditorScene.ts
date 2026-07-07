@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { useSceneStore } from '@/store/sceneStore';
 import { useLightStore } from '@/store/lightStore';
 import { useAnimationStore } from '@/store/animationStore';
+import { useParticleStore } from '@/store/particleStore';
+import { disposeAllParticleSystems } from '@/utils/particleScene';
 import { useHistoryStore } from '@/store/historyStore';
 import { useTourStore } from '@/store/tourStore';
 import { disposeObject3DResources, isEditorHelperObject } from '@/utils/sceneUtils';
@@ -35,6 +37,7 @@ export function clearEditorScene() {
   useSceneStore.getState().clearScene();
   useSceneStore.getState().deselectAll();
   useAnimationStore.getState().clearTextureUvAnimations();
+  disposeAllParticleSystems();
   useHistoryStore.getState().clear();
   useTourStore.getState().loadTours([], null);
   useLightStore.getState().replaceLights([]);

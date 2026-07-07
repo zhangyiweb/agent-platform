@@ -11,6 +11,7 @@ import {
   BoxPlotOutlined,
   AppstoreOutlined,
   BlockOutlined,
+  CloudOutlined,
 } from '@ant-design/icons';
 import { disposeObject3DResources, findThreeObjectById } from '@/utils/sceneUtils';
 import * as THREE from 'three';
@@ -20,7 +21,7 @@ interface TreeNode {
   id: string;
   uuid: string;
   name: string;
-  type: 'model' | 'group' | 'mesh' | 'light';
+  type: 'model' | 'group' | 'mesh' | 'light' | 'particle';
   children: TreeNode[];
 }
 
@@ -29,7 +30,13 @@ function isHelperObject(obj: THREE.Object3D): boolean {
     obj.name === 'grid' ||
     obj.name === 'axes' ||
     obj.name.startsWith('helper_') ||
+    obj.name === 'quarks_batched_renderer' ||
+    obj.type === 'BatchedRenderer' ||
+    obj.type === 'VFXBatch' ||
     obj.userData?.isLightPickProxy === true ||
+    obj.userData?.isParticlePoints === true ||
+    obj.userData?.isParticlePickProxy === true ||
+    obj.userData?.isEditorHelper === true ||
     obj.userData?.isLightTarget === true ||
     obj.type === 'TransformControlsGizmo' ||
     (obj.children.length === 2 && obj.children[0]?.type === 'TransformControlsGizmo') ||
@@ -95,6 +102,8 @@ function TreeNodeItem({
   const icon =
     node.type === 'light' ? (
       <BulbOutlined className="text-yellow-400 scene-tree-icon" />
+    ) : node.type === 'particle' ? (
+      <CloudOutlined className="text-purple-400 scene-tree-icon" />
     ) : node.type === 'mesh' ? (
       <BlockOutlined className="text-blue-400 scene-tree-icon" />
     ) : node.type === 'group' ? (
@@ -219,7 +228,9 @@ export function SceneTree() {
     const id = obj.userData?.id || obj.userData?.businessId || obj.uuid;
 
     let type: TreeNode['type'] = 'model';
-    if (obj instanceof THREE.Mesh) type = 'mesh';
+    if (obj.userData?.isParticleEmitter) {
+      type = 'particle';
+    } else if (obj instanceof THREE.Mesh) type = 'mesh';
     else if (obj instanceof THREE.Group || children.length > 0) type = 'group';
 
     return {

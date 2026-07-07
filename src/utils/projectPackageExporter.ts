@@ -17,6 +17,7 @@ import {
 } from '@/utils/exportedProjectTemplates';
 import { buildCameraTourJs } from '@/utils/exportedCameraTourTemplate';
 import { buildPostProcessJs } from '@/utils/exportedPostProcessTemplate';
+import { buildParticleRuntimeJs } from '@/utils/exportedParticleRuntime';
 import {
   buildCameraTourGuideMarkdown,
   buildCameraTourIndexJson,
@@ -318,6 +319,7 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
   root.file('js/main.js', buildMainJs(Boolean(exportTour)));
   root.file('js/cameraTour.js', buildCameraTourJs());
   root.file('js/postProcess.js', buildPostProcessJs());
+  root.file('js/particleRuntime.js', buildParticleRuntimeJs());
   root.file('README.md', buildReadme(baseConfig.exportTime));
 
   const blob = await zip.generateAsync({ type: 'blob' });

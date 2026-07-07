@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SceneState, SceneObject, CameraConfig } from '@/types/scene';
 import * as THREE from 'three';
 import { useAnimationStore } from '@/store/animationStore';
+import { disposeParticleSystem } from '@/utils/particleScene';
 
 interface SceneStore extends SceneState {
   // Three.js对象映射 (业务ID -> Three.js对象)
@@ -90,6 +91,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
       const newMap = new Map(state.threeObjects);
       newMap.delete(id);
       useAnimationStore.getState().removeTextureUvAnimation(id);
+      disposeParticleSystem(id);
       return {
         objects: state.objects.filter((obj) => obj.id !== id),
         selectedIds: state.selectedIds.filter((sid) => sid !== id),

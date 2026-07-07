@@ -25,6 +25,7 @@ import { useModelLoader } from '@/hooks/useModelLoader';
 import { useLightStore } from '@/store/lightStore';
 import { useHistoryStore } from '@/store/historyStore';
 import { tickTextureUvAnimations } from '@/utils/textureAnimationRuntime';
+import { tickParticleSystems, disposeAllParticleSystems } from '@/utils/particleScene';
 import { tickEditorCameraFly } from '@/utils/cameraTourPlayer';
 import { tickEditorCameraTour } from '@/components/Panels/CameraTourPanel';
 import { disposeObject3DResources } from '@/utils/sceneUtils';
@@ -443,6 +444,7 @@ export function EditorViewport() {
     initializedRef.current = true;
 
     // 清理旧的全局引用(防止使用旧场景对象)
+    disposeAllParticleSystems();
     delete (window as any).__editorScene;
     delete (window as any).__sceneInitialized;
 
@@ -1074,6 +1076,7 @@ export function EditorViewport() {
         delta,
         useSceneStore.getState().getThreeObject
       );
+      tickParticleSystems(delta);
     }
 
     // 检查后期处理配置变化(从全局读取)
@@ -1194,6 +1197,7 @@ export function EditorViewport() {
       delete (window as any).__editorControls;
       delete (window as any).__editorTransformControls;
       delete (window as any).__sceneInitialized;
+      disposeAllParticleSystems();
       initializedRef.current = false;
 
       if (rendererRef.current) {

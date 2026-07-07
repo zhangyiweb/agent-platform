@@ -5,13 +5,16 @@ import {
   createPrimitiveObject,
   type PrimitiveGeometryType,
 } from '@/config/defaultGeometry';
+import { createParticleEmitter } from '@/utils/particleScene';
+import { getParticleSpawnTransform } from '@/particles/quarksAdapter';
+import { PARTICLE_PRESETS } from '@/particles/particlePresets';
+import type { ParticlePresetId } from '@/types/particle';
 
 export function ComponentLibrary() {
   const { addLight, selectLight } = useLightStore();
   const { addSceneObject, selectObject, deselectAll } = useSceneStore();
-  const [activeTab, setActiveTab] = useState<'geometry' | 'lights'>('geometry'); // 默认显示几何体
+  const [activeTab, setActiveTab] = useState<'geometry' | 'lights' | 'particles'>('geometry');
 
-  // 添加灯光
   const handleAddLight = (type: 'ambient' | 'directional' | 'point' | 'spot' | 'hemisphere') => {
     const lightConfigs: Record<string, any> = {
       ambient: {
@@ -70,7 +73,6 @@ export function ComponentLibrary() {
     selectLight(lightId);
   };
 
-  // 添加基础几何体（统一默认材质、位置、阴影等）
   const handleAddGeometry = (type: PrimitiveGeometryType) => {
     const scene = (window as any).__editorScene;
     if (!scene) return;
@@ -105,6 +107,43 @@ export function ComponentLibrary() {
     }
   };
 
+  const handleAddParticle = (presetId: ParticlePresetId) => {
+    const scene = (window as any).__editorScene;
+    if (!scene) return;
+
+    const preset = PARTICLE_PRESETS.find((p) => p.id === presetId);
+    const id = `particle_${Date.now()}`;
+    const name = preset?.label ?? '粒子发射器';
+
+    const spawnPos = getParticleSpawnTransform(presetId);
+
+    const root = createParticleEmitter(scene, id, name, { preset: presetId }, {
+      position: spawnPos,
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    });
+
+    addSceneObject({
+      id,
+      name,
+      type: 'particle',
+      visible: true,
+      position: spawnPos,
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    });
+
+    useSceneStore.getState().registerThreeObject(id, root);
+
+    selectLight(null);
+    selectObject(id);
+
+    const transformControls = (window as any).__editorTransformControls;
+    if (transformControls) {
+      transformControls.attach(root);
+    }
+  };
+
   const lightItems: { type: 'ambient' | 'directional' | 'point' | 'spot' | 'hemisphere'; label: string }[] = [
     { type: 'ambient', label: '环境光' },
     { type: 'directional', label: '平行光' },
@@ -135,43 +174,32 @@ export function ComponentLibrary() {
   const itemButtonClass =
     'px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors';
 
+  const tabClass = (tab: typeof activeTab) =>
+    `flex-1 px-2 py-2 text-xs font-medium transition-colors ${
+      activeTab === tab
+        ? 'text-white border-b-2 border-blue-500 bg-gray-800'
+        : 'text-gray-400 hover:text-white'
+    }`;
+
   return (
     <div className="h-full flex flex-col bg-gray-900 border-t border-gray-700">
-      {/* Tab栏 */}
       <div className="flex border-b border-gray-700">
-        <button
-          onClick={() => setActiveTab('lights')}
-          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === 'lights'
-              ? 'text-white border-b-2 border-blue-500 bg-gray-800'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
+        <button type="button" onClick={() => setActiveTab('lights')} className={tabClass('lights')}>
           💡 灯光
         </button>
-        <button
-          onClick={() => setActiveTab('geometry')}
-          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === 'geometry'
-              ? 'text-white border-b-2 border-blue-500 bg-gray-800'
-              : 'text-gray-400 hover:text-white'
-          }`}
-        >
+        <button type="button" onClick={() => setActiveTab('geometry')} className={tabClass('geometry')}>
           📦 几何体
+        </button>
+        <button type="button" onClick={() => setActiveTab('particles')} className={tabClass('particles')}>
+          ✨ 粒子
         </button>
       </div>
 
-      {/* 内容 */}
       <div className="flex-1 overflow-y-auto p-3">
         {activeTab === 'lights' && (
           <div className="grid grid-cols-2 gap-2">
             {lightItems.map(({ type, label }) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => handleAddLight(type)}
-                className={itemButtonClass}
-              >
+              <button key={type} type="button" onClick={() => handleAddLight(type)} className={itemButtonClass}>
                 {label}
               </button>
             ))}
@@ -181,15 +209,30 @@ export function ComponentLibrary() {
         {activeTab === 'geometry' && (
           <div className="grid grid-cols-2 gap-2">
             {geometryItems.map(({ type, label }) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => handleAddGeometry(type)}
-                className={itemButtonClass}
-              >
+              <button key={type} type="button" onClick={() => handleAddGeometry(type)} className={itemButtonClass}>
                 {label}
               </button>
             ))}
+          </div>
+        )}
+
+        {activeTab === 'particles' && (
+          <div>
+            <p className="text-[10px] text-gray-500 mb-2">
+              基于 <strong className="text-purple-300">three.quarks</strong> 插件库，支持烟雾、火焰、魔法等高级 VFX，可在右侧属性面板自定义参数或导入 JSON。
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {PARTICLE_PRESETS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => handleAddParticle(id)}
+                  className={itemButtonClass}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

@@ -45,6 +45,8 @@ export function syncSceneObjectsToStore(scene: THREE.Scene) {
 /** 判断对象是否为编辑器辅助对象（不应导出） */
 export function isEditorHelperObject(obj: THREE.Object3D): boolean {
   if (obj.name === 'grid' || obj.name === 'axes') return true;
+  if (obj.name === 'quarks_batched_renderer') return true;
+  if (obj.type === 'BatchedRenderer' || obj.type === 'VFXBatch') return true;
   if (obj.name.startsWith('helper_')) return true;
   if (obj.userData?.isEditorHelper) return true;
   if (obj.userData?.tourVisual) return true;
@@ -94,6 +96,7 @@ export function createModelsExportScene(source: THREE.Scene): THREE.Scene {
     if (isEditorHelperObject(child)) return;
     if (child instanceof THREE.Light) return;
     if (child.userData?.isLightTarget) return;
+    if (child.userData?.isParticleEmitter) return;
     if (
       child instanceof THREE.Mesh ||
       child instanceof THREE.Group ||
@@ -113,6 +116,7 @@ export function createExportScene(source: THREE.Scene): THREE.Scene {
 
   source.children.forEach((child) => {
     if (isEditorHelperObject(child)) return;
+    if (child.userData?.isParticleEmitter) return;
     if (child instanceof THREE.Light) {
       exportScene.add(child.clone());
       return;
@@ -149,6 +153,17 @@ function disposeMaterial(material: THREE.Material) {
 export function disposeObject3DResources(root: THREE.Object3D | null | undefined) {
   if (!root) return;
   root.traverse((child) => {
+    if (child instanceof THREE.Points) {
+      child.geometry?.dispose();
+      const ptsMat = child.material;
+      if (Array.isArray(ptsMat)) {
+        ptsMat.forEach((material) => material?.dispose());
+      } else {
+        ptsMat?.dispose();
+      }
+      return;
+    }
+
     if (child instanceof THREE.Mesh) {
       child.geometry?.dispose();
       const materials = Array.isArray(child.material) ? child.material : [child.material];
