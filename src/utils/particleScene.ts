@@ -61,8 +61,7 @@ export function getParticleSystem(id: string): QuarksParticleEntry | undefined {
 
 function resolveParticleRootVisible(id: string, config?: ParticleEmitterConfig): boolean {
   const cfg = config ?? useParticleStore.getState().emitters[id];
-  const sceneObj = useSceneStore.getState().objects.find((o) => o.id === id);
-  return (sceneObj?.visible !== false) && (cfg?.enabled !== false);
+  return cfg?.enabled !== false;
 }
 
 /** 同步粒子根节点显隐（场景可见 × 发射器启用） */
@@ -269,28 +268,34 @@ export function restoreParticleEmitters(
 ) {
   disposeAllParticleSystems();
 
+  const syncedEmitters = { ...emitters };
+
   objects
     .filter((o) => o.type === 'particle')
     .forEach((obj) => {
-      const config = emitters[obj.id] ?? getPresetConfig('smoke');
+      const rawConfig = emitters[obj.id] ?? getPresetConfig('smoke');
+      const active = (obj.visible !== false) && (rawConfig.enabled !== false);
+      const config = { ...rawConfig, enabled: active };
+      syncedEmitters[obj.id] = config;
+
       const root = createParticleEmitter(scene, obj.id, obj.name, config, {
         position: obj.position,
         rotation: obj.rotation,
         scale: obj.scale,
       });
-      root.visible = obj.visible !== false;
+      root.visible = active;
 
       useSceneStore.getState().registerThreeObject(obj.id, root);
       useSceneStore.getState().addObject({
         id: obj.id,
         name: obj.name,
         type: 'particle',
-        visible: obj.visible !== false,
+        visible: active,
         position: [...obj.position],
         rotation: [...obj.rotation],
         scale: [...obj.scale],
       });
     });
 
-  useParticleStore.getState().replaceEmitters(emitters);
+  useParticleStore.getState().replaceEmitters(syncedEmitters);
 }

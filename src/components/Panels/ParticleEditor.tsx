@@ -1,6 +1,7 @@
 import { Switch, Button, App } from 'antd';
 import { useState } from 'react';
 import { useParticleStore } from '@/store/particleStore';
+import { useSceneStore } from '@/store/sceneStore';
 import { DEFAULT_PARTICLE_CONFIG } from '@/types/particle';
 import { syncParticleConfig } from '@/utils/particleScene';
 import {
@@ -55,6 +56,9 @@ export function ParticleEditor({ objectId }: ParticleEditorProps) {
   const update = (updates: Partial<ParticleEmitterConfig>) => {
     const next = { ...config, ...updates };
     syncParticleConfig(objectId, next);
+    if (updates.enabled !== undefined) {
+      useSceneStore.getState().updateObject(objectId, { visible: updates.enabled });
+    }
   };
 
   const handleExportJson = async () => {

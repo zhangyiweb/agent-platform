@@ -5,7 +5,6 @@ import * as THREE from 'three';
 import { MaterialEditor } from './MaterialEditor';
 import { GlobalSettings } from './GlobalSettings';
 import { ParticleEditor } from './ParticleEditor';
-import { syncParticleRootVisibility } from '@/utils/particleScene';
 
 export function PropertyPanel() {
   const { selectedIds, objects, updateObject, getThreeObject } = useSceneStore();
@@ -127,10 +126,6 @@ export function PropertyPanel() {
 
     setObjectVisible(nextVisible);
     updateObject(storeId, { visible: nextVisible });
-
-    if (selectedObject?.type === 'particle') {
-      syncParticleRootVisibility(storeId);
-    }
   };
 
   // 实时同步灯光坐标（Gizmo 拖拽时更新右侧面板）
@@ -613,38 +608,11 @@ export function PropertyPanel() {
 
   const isParticle = selectedObject?.type === 'particle';
 
-  // 选中粒子发射器 — 详情与粒子参数合并为单页
+  // 选中粒子发射器 — 单页粒子参数（显隐由「启用」统一控制）
   if (isParticle && selectedObject) {
     return (
       <div className="h-full flex flex-col bg-gray-900">
         <div className="flex-1 overflow-y-auto">
-          <div className="p-3 space-y-3 border-b border-gray-700">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">名称</label>
-              <input
-                type="text"
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
-                value={selectedObject.name}
-                onChange={(e) => updateObject(selectedObject.id, { name: e.target.value })}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">可见</span>
-              <button
-                type="button"
-                onClick={handleVisibilityToggle}
-                className={`w-10 h-5 rounded-full transition-colors ${
-                  objectVisible ? 'bg-green-500' : 'bg-gray-600'
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 bg-white rounded-full transform transition-transform ${
-                    objectVisible ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
           <ParticleEditor objectId={selectedObject.id} />
         </div>
       </div>
