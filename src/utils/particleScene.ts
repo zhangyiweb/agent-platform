@@ -59,6 +59,20 @@ export function getParticleSystem(id: string): QuarksParticleEntry | undefined {
   return entries.get(id);
 }
 
+function resolveParticleRootVisible(id: string, config?: ParticleEmitterConfig): boolean {
+  const cfg = config ?? useParticleStore.getState().emitters[id];
+  const sceneObj = useSceneStore.getState().objects.find((o) => o.id === id);
+  return (sceneObj?.visible !== false) && (cfg?.enabled !== false);
+}
+
+/** 同步粒子根节点显隐（场景可见 × 发射器启用） */
+export function syncParticleRootVisibility(id: string) {
+  const entry = entries.get(id);
+  if (!entry) return;
+  entry.root.visible = resolveParticleRootVisible(id);
+}
+
+
 function applyTransform(
   root: THREE.Object3D,
   transform?: {
@@ -134,7 +148,7 @@ function rebuildQuarksEntry(id: string, config: ParticleEmitterConfig) {
   newRoot.position.copy(worldPos);
   newRoot.quaternion.copy(worldQuat);
   newRoot.scale.copy(worldScale);
-  newRoot.visible = config.enabled;
+  newRoot.visible = resolveParticleRootVisible(id, config);
 
   const newHelper = createEmitHelper(config);
   if (newHelper) newRoot.add(newHelper);
@@ -234,8 +248,7 @@ export function tickParticleSystems(delta: number) {
 
   entries.forEach((entry) => {
     const id = entry.root.userData.id as string;
-    const cfg = useParticleStore.getState().emitters[id];
-    entry.root.visible = cfg?.enabled !== false;
+    entry.root.visible = resolveParticleRootVisible(id);
   });
 
   tickQuarksBatchedRenderer(delta);
