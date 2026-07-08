@@ -388,6 +388,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
               result.cameraTourMode === 'spline' ? '一镜到底' : '站点'
             }${result.cameraTourCount > 1 ? ` 等${result.cameraTourCount}条` : ''})`
           : null,
+        result.hasParticles ? `含 ${result.particleCount} 个粒子发射器` : null,
       ].filter(Boolean).join(' · ');
       notify.success(`项目包已导出（${detail}）`);
     } catch (error) {

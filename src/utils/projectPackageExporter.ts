@@ -19,6 +19,10 @@ import { buildCameraTourJs } from '@/utils/exportedCameraTourTemplate';
 import { buildPostProcessJs } from '@/utils/exportedPostProcessTemplate';
 import { buildParticleRuntimeJs } from '@/utils/exportedParticleRuntime';
 import {
+  countParticleEmitters,
+  packParticleTexturesForExport,
+} from '@/utils/exportParticleAssets';
+import {
   buildCameraTourGuideMarkdown,
   buildCameraTourIndexJson,
   buildCameraTourJson,
@@ -56,6 +60,8 @@ export interface ProjectPackageExportResult {
   cameraTourCount: number;
   cameraTourName?: string;
   cameraTourMode?: 'stop' | 'spline';
+  hasParticles: boolean;
+  particleCount: number;
 }
 
 async function exportGlbBuffer(
@@ -254,6 +260,16 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
   }
 
   const baseConfig = generateSceneConfig();
+  const rawParticles = baseConfig.editor.particles ?? {};
+  const { particles: packedParticles, files: particleTextureFiles } =
+    await packParticleTexturesForExport(rawParticles);
+  const particleCount = countParticleEmitters(baseConfig.editor.objects, packedParticles);
+  const hasParticles = particleCount > 0;
+
+  particleTextureFiles.forEach(({ path, data }) => {
+    root.file(path, data);
+  });
+
   const textureUvStates = collectTextureUvStates(scene);
   const assets: {
     model?: string;
@@ -305,10 +321,22 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
   const exportTour = writeCameraTourFiles(root, tours, activeTourId);
 
   const projectConfig = applyExportPackageCameraDefaults(
-    buildProjectConfig(baseConfig, assets, textureUvStates, polyhavenModels, {
-      cameraTours: exportableTours,
-      activeCameraTourId: exportTour?.id ?? activeTourId,
-    })
+    buildProjectConfig(
+      {
+        ...baseConfig,
+        editor: {
+          ...baseConfig.editor,
+          ...(hasParticles ? { particles: packedParticles } : {}),
+        },
+      },
+      assets,
+      textureUvStates,
+      polyhavenModels,
+      {
+        cameraTours: exportableTours,
+        activeCameraTourId: exportTour?.id ?? activeTourId,
+      }
+    )
   );
 
   const exportTitle = `数字孪生场景 ${new Date(baseConfig.exportTime).toLocaleString('zh-CN')}`;
@@ -337,5 +365,7 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
     cameraTourCount: exportableTours.length,
     cameraTourName: exportTour?.name,
     cameraTourMode: exportTour?.mode,
+    hasParticles,
+    particleCount,
   };
 }

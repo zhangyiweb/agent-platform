@@ -5,7 +5,7 @@ import {
   EXPORT_PACKAGE_DEFAULT_CONTROLS_TARGET,
 } from '@/config/exportDefaults';
 
-const THREE_VERSION = '0.184.0';
+const THREE_VERSION = '0.185.0';
 const QUARKS_VERSION = '0.17.1';
 
 export function buildIndexHtml(title: string): string {
@@ -429,6 +429,8 @@ export function buildReadme(exportTime: string): string {
 ├── css/style.css       # 样式
 ├── js/
 │   ├── main.js         # Three.js 场景启动脚本（ES Module）
+│   ├── particleRuntime.js # 粒子特效运行时（three.quarks）
+│   ├── postProcess.js  # 全屏后期处理
 │   └── cameraTour.js   # 相机漫游工具包（无 UI，支持站点/一镜到底两种模式）
 ├── config/
 │   ├── scene.json           # 相机、灯光、雾效、渲染器、后期等完整配置
@@ -473,10 +475,11 @@ python -m http.server 8080
   - 加载后控制台执行 \`window.cameraTour.play()\` 试播；完整 API 见 \`js/cameraTour.js\` 顶部注释与 \`docs/camera-tour-guide.md\`。
   - 切换路线：\`await window.cameraTour.loadConfig('./config/camera-tours/路线id.json')\`
 - **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存编辑器后期参数，\`js/postProcess.js\` 与 \`main.js\` 已自动接入 EffectComposer。
+- **粒子特效**：\`editor.particles\` 保存各发射器参数（预设、发射形状、颜色、贴图等）；\`editor.objects\` 中 \`type: "particle"\` 的对象记录位置与显隐。\`js/particleRuntime.js\` 基于 three.quarks 自动创建并播放，与编辑器预览一致。自定义贴图会写入 \`assets/textures/particles/\`。
 
 ## 依赖
 
-运行时通过 importmap 从 jsDelivr 加载 Three.js r${THREE_VERSION}、从 unpkg 加载 postprocessing，无需本地 npm install 即可预览。
+运行时通过 importmap 从 jsDelivr 加载 Three.js r${THREE_VERSION}、从 unpkg 加载 three.quarks 与 postprocessing，无需本地 npm install 即可预览。
 生产环境建议改为本地依赖或打包工具（Vite / Webpack）。
 `;
 }
