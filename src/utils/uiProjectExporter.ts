@@ -1,6 +1,11 @@
 import JSZip from 'jszip';
 import type { UIElement } from '@/types/uiEditor';
-import { buildUIExportBundle, parseDataUrl } from '@/utils/uiExportCore';
+import {
+  buildUIExportBundle,
+  buildUIIndexHtml,
+  buildUIStyleCss,
+  parseDataUrl,
+} from '@/utils/uiExportCore';
 
 export interface UIProjectExportResult {
   filename: string;
@@ -16,7 +21,11 @@ function buildReadme(canvasWidth: number, canvasHeight: number, exportTime: stri
 ## 目录结构
 
 \`\`\`
-├── index.html              # 单文件页面（CSS / JS 已内联，可直接复制使用）
+├── index.html              # 页面入口（语义化 HTML，无内联样式）
+├── css/
+│   └── style.css           # 全局样式、元素布局、悬停效果
+├── js/
+│   └── main.js             # 入口脚本（图表初始化 + 二次开发钩子）
 └── assets/images/          # 切图与背景图资源
 \`\`\`
 
@@ -26,15 +35,17 @@ ${canvasWidth} × ${canvasHeight}
 
 ## 使用方式
 
-1. **整页复制**：打开 \`index.html\`，将 \`<style>\` 与 \`<script>\` 内容复制到你的项目中
-2. **图片资源**：\`assets/images/\` 下的文件需与 HTML 保持相对路径，或自行替换为 CDN 地址
-3. **二次开发**：通过各元素的 \`id\` / \`class\` 绑定业务逻辑；图表使用 ECharts CDN，可在内联脚本中对接动态数据
+1. **本地预览**：在项目根目录执行 \`npx serve .\`，浏览器访问提示的地址
+2. **样式修改**：编辑 \`css/style.css\`，各元素通过 \`#元素id\` 选择器定位
+3. **交互逻辑**：在 \`js/main.js\` 的「二次开发入口」区域绑定事件、对接接口
+4. **图表数据**：修改 \`js/main.js\` 中 \`chartConfigs\` 的 \`option\` 字段，或调用 \`chart.setOption()\` 动态更新
+5. **图片资源**：\`assets/images/\` 下的文件需与 HTML 保持相对路径，或自行替换为 CDN 地址
 
-## 本地预览
+## 二次开发说明
 
-\`\`\`bash
-npx serve .
-\`\`\`
+- 每个元素在编辑器中可设置自定义 \`id\` 和 \`class\`，导出后可直接用于 DOM 查询
+- HTML 仅包含结构与语义标签，样式全部在 CSS 文件中
+- JS 使用 IIFE 包裹，避免全局污染；可按需改为 ES Module 或接入构建工具
 `;
 }
 
@@ -80,35 +91,12 @@ export async function exportUIProjectPackage(
     root.file(path, bytes);
   });
 
-  const hoverBlock = bundle.hoverCss ? `\n    ${bundle.hoverCss}` : '';
-  const chartScript = bundle.hasCharts
-    ? `
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"><\/script>
-  <script>
-${bundle.chartInitJs}
-  <\/script>`
-    : '';
-
-  const indexHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UI 页面</title>
-  <style>
-    ${bundle.baseCss}${hoverBlock}
-  </style>
-</head>
-<body>
-  <div class="ui-page" data-design-width="${canvasWidth}" data-design-height="${canvasHeight}">
-    ${bundle.bodyHtml}
-  </div>${chartScript}
-</body>
-</html>`;
-
-  root.file('index.html', indexHtml);
-
   const exportTime = new Date().toISOString();
+  const title = `UI 页面 ${new Date(exportTime).toLocaleString('zh-CN')}`;
+
+  root.file('index.html', buildUIIndexHtml(bundle, canvasWidth, canvasHeight, title));
+  root.file('css/style.css', buildUIStyleCss(bundle));
+  root.file('js/main.js', bundle.mainJs);
   root.file('README.md', buildReadme(canvasWidth, canvasHeight, exportTime));
 
   const blob = await zip.generateAsync({ type: 'blob' });
