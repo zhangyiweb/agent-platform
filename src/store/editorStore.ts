@@ -1,9 +1,12 @@
 import { create } from 'zustand';
-import type { EditorState, EditorTool } from '@/types/scene';
+import type { EditorMode, EditorState, EditorTool } from '@/types/scene';
 
 interface EditorStore extends EditorState {
   // 切换工具
   setTool: (tool: EditorTool) => void;
+
+  // 切换编辑器模式
+  setEditorMode: (mode: EditorMode) => void;
   
   // 切换网格显示
   toggleGrid: () => void;
@@ -20,12 +23,15 @@ const initialState: EditorState = {
   gridVisible: true,
   axesVisible: true,
   wireframeMode: false,
+  editorMode: 'scene',
 };
 
 export const useEditorStore = create<EditorStore>((set) => ({
   ...initialState,
 
   setTool: (tool) => set({ currentTool: tool }),
+
+  setEditorMode: (mode) => set({ editorMode: mode }),
 
   toggleGrid: () =>
     set((state) => ({ gridVisible: !state.gridVisible })),

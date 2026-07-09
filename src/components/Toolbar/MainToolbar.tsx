@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { Modal } from 'antd';
 import { useEditorNotify } from '@/hooks/useEditorNotify';
+import { useEditorStore } from '@/store/editorStore';
 import { useModelLoader } from '@/hooks/useModelLoader';
 import { ExportPanel } from '@/components/Panels/ExportPanel';
 import { ModelPickerModal } from '@/components/Panels/ModelPickerModal';
@@ -10,14 +11,19 @@ import {
   importEditorProjectJson,
   importEditorProjectZip,
 } from '@/utils/editorProjectImporter';
+import { saveUIEditorProject } from '@/utils/uiEditorProjectExporter';
+import { importUIEditorProjectJson, importUIEditorProjectZip } from '@/utils/uiEditorProjectImporter';
 import {
   DEFAULT_MODEL_RESOLUTION,
   type ModelAsset,
   type ModelResolution,
 } from '@/utils/polyhaven';
+import { useUIEditorStore } from '@/store/uiEditorStore';
+import { exportUIProjectPackage } from '@/utils/uiProjectExporter';
 
 export function Toolbar() {
   const notify = useEditorNotify();
+  const { editorMode, setEditorMode } = useEditorStore();
   const [showExport, setShowExport] = useState(false);
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [modelResolution, setModelResolution] = useState<ModelResolution>(DEFAULT_MODEL_RESOLUTION);
@@ -67,8 +73,20 @@ export function Toolbar() {
     }
   };
 
-  const handleExport = () => {
-    setShowExport(true);
+  const handleExportProject = async () => {
+    const { elements, canvasWidth, canvasHeight, canvasBackground } = useUIEditorStore.getState();
+    if (elements.length === 0) {
+      notify.warning('画布为空，请先添加 UI 元素');
+      return;
+    }
+    try {
+      const result = await exportUIProjectPackage(elements, canvasWidth, canvasHeight, canvasBackground);
+      const detail = result.imageCount > 0 ? `，含 ${result.imageCount} 张图片` : '';
+      notify.success(`项目包已导出（${result.filename}${detail}）`);
+    } catch (error) {
+      console.error(error);
+      notify.error(error instanceof Error ? error.message : '项目包导出失败');
+    }
   };
 
   const handleExportComplete = () => {
@@ -78,8 +96,14 @@ export function Toolbar() {
   const handleSaveProject = async () => {
     setSavingProject(true);
     try {
-      const result = await saveEditorProject();
-      notify.success(`项目已保存：${result.filename}`);
+      if (editorMode === 'ui') {
+        const result = await saveUIEditorProject();
+        const detail = result.imageCount > 0 ? `，含 ${result.imageCount} 张图片` : '';
+        notify.success(`UI 项目已保存：${result.filename}${detail}`);
+      } else {
+        const result = await saveEditorProject();
+        notify.success(`项目已保存：${result.filename}`);
+      }
     } catch (error) {
       console.error(error);
       notify.error(error instanceof Error ? error.message : '项目保存失败');
@@ -96,12 +120,22 @@ export function Toolbar() {
     setOpeningProject(true);
     try {
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext === 'zip') {
-        await importEditorProjectZip(file);
-      } else if (ext === 'json') {
-        await importEditorProjectJson(file);
+      if (editorMode === 'ui') {
+        if (ext === 'zip') {
+          await importUIEditorProjectZip(file);
+        } else if (ext === 'json') {
+          await importUIEditorProjectJson(file);
+        } else {
+          throw new Error('仅支持 .zip UI 项目包或 .json UI 配置');
+        }
       } else {
-        throw new Error('仅支持 .zip 项目包或 .json 场景配置');
+        if (ext === 'zip') {
+          await importEditorProjectZip(file);
+        } else if (ext === 'json') {
+          await importEditorProjectJson(file);
+        } else {
+          throw new Error('仅支持 .zip 项目包或 .json 场景配置');
+        }
       }
       notify.success(`项目已打开：${file.name}`);
     } catch (error) {
@@ -123,10 +157,15 @@ export function Toolbar() {
       }
     };
 
-    if (hasEditorSceneContent()) {
+    const hasUnsavedContent =
+      editorMode === 'ui' ? useUIEditorStore.getState().hasContent() : hasEditorSceneContent();
+
+    if (hasUnsavedContent) {
       Modal.confirm({
         title: '打开项目',
-        content: '当前场景尚未保存，打开项目将覆盖现有内容。是否继续？',
+        content: editorMode === 'ui'
+          ? '当前 UI 画布尚未保存，打开项目将覆盖现有 UI 内容。是否继续？'
+          : '当前场景尚未保存，打开项目将覆盖现有内容。是否继续？',
         okText: '继续打开',
         cancelText: '取消',
         onOk: openFile,
@@ -161,6 +200,36 @@ export function Toolbar() {
           </div>
         </div>
 
+        <div className="toolbar-center">
+          <div className="editor-mode-switch">
+            <button
+              type="button"
+              className={`editor-mode-btn ${editorMode === 'scene' ? 'active' : ''}`}
+              onClick={() => setEditorMode('scene')}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4L8 1L14 4V12L8 15L2 12V4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                <path d="M8 1V15" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M2 4L14 4" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+              <span>场景编辑</span>
+            </button>
+            <button
+              type="button"
+              className={`editor-mode-btn ${editorMode === 'ui' ? 'active' : ''}`}
+              onClick={() => setEditorMode('ui')}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M2 5H14" stroke="currentColor" strokeWidth="1.5"/>
+                <rect x="4" y="7" width="4" height="2" rx="0.5" fill="currentColor" opacity="0.5"/>
+                <rect x="4" y="10" width="8" height="2" rx="0.5" fill="currentColor" opacity="0.3"/>
+              </svg>
+              <span>UI 编排</span>
+            </button>
+          </div>
+        </div>
+
         <div className="toolbar-right">
           <input
             ref={fileInputRef}
@@ -178,64 +247,107 @@ export function Toolbar() {
             className="hidden"
           />
 
-          <button
-            onClick={handleOpenProjectClick}
-            disabled={openingProject}
-            className="toolbar-btn btn-import"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-            <span>{openingProject ? '打开中…' : '打开项目'}</span>
-          </button>
+          {editorMode === 'scene' ? (
+            <>
+              <button
+                onClick={handleOpenProjectClick}
+                disabled={openingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{openingProject ? '打开中…' : '打开项目'}</span>
+              </button>
 
-          <button
-            onClick={handleSaveProject}
-            disabled={savingProject}
-            className="toolbar-btn btn-import"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-              <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-              <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-            <span>{savingProject ? '保存中…' : '保存项目'}</span>
-          </button>
+              <button
+                onClick={handleSaveProject}
+                disabled={savingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{savingProject ? '保存中…' : '保存项目'}</span>
+              </button>
 
-          <button
-            onClick={handleImport}
-            className="toolbar-btn btn-import"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 2V10M8 2L5 5M8 2L11 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span>导入模型</span>
-          </button>
+              <button
+                onClick={handleImport}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2V10M8 2L5 5M8 2L11 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span>导入模型</span>
+              </button>
 
-          <button
-            onClick={() => setModelModalOpen(true)}
-            disabled={!!loadingModelId}
-            className="toolbar-btn btn-import"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 13V6L8 3L13 6V13H3Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-              <path d="M3 9H13" stroke="currentColor" strokeWidth="1.5"/>
-            </svg>
-            <span>模型库</span>
-          </button>
+              <button
+                onClick={() => setModelModalOpen(true)}
+                disabled={!!loadingModelId}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 13V6L8 3L13 6V13H3Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M3 9H13" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+                <span>模型库</span>
+              </button>
 
-          <button
-            onClick={handleExport}
-            className="toolbar-btn btn-export"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 10V2M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span>导出</span>
-          </button>
+              <button
+                onClick={() => setShowExport(true)}
+                className="toolbar-btn btn-export"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 10V2M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span>导出</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={handleOpenProjectClick}
+                disabled={openingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{openingProject ? '打开中…' : '打开项目'}</span>
+              </button>
+
+              <button
+                onClick={handleSaveProject}
+                disabled={savingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{savingProject ? '保存中…' : '保存项目'}</span>
+              </button>
+
+              <button
+                onClick={handleExportProject}
+                className="toolbar-btn btn-export"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 2H10L13 5V13C13 13.5523 12.5523 14 12 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2Z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+                <span>导出项目</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -249,7 +361,7 @@ export function Toolbar() {
         onSelect={handlePolyhavenModelSelect}
       />
 
-      {showExport && (
+      {showExport && editorMode === 'scene' && (
         <ExportPanel onClose={handleExportComplete} />
       )}
     </header>

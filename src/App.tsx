@@ -9,6 +9,7 @@ import { SceneTree } from '@/components/Panels/SceneTree'
 import { ComponentLibrary } from '@/components/Panels/ComponentLibrary'
 import { PropertyPanel } from '@/components/Panels/PropertyPanel'
 import { Toolbar } from '@/components/Toolbar/MainToolbar'
+import { UIEditor } from '@/components/UIEditor'
 import { GizmoToolbar } from '@/components/Toolbar/GizmoToolbar'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import * as THREE from 'three'
@@ -20,7 +21,7 @@ function App() {
   
   const { selectedIds, objects } = useSceneStore();
   const { lights } = useLightStore();
-  const { currentTool } = useEditorStore();
+  const { currentTool, editorMode } = useEditorStore();
   
   // 统计信息
   const [fps, setFps] = useState(60);
@@ -123,51 +124,50 @@ function App() {
       {/* 顶部工具栏 */}
       <Toolbar />
 
-      {/* 主内容区 */}
-      <div className="main-content">
-        {/* 左侧面板 - 上下结构 */}
-        <aside className="scene-tree" style={{ display: 'flex', flexDirection: 'column' }}>
-          {/* 上部: 场景树 */}
-          <div style={{ height: '50%', overflow: 'hidden' }}>
-            <SceneTree />
-          </div>
-          
-          {/* 下部: 组件库 */}
-          <div style={{ height: '50%', overflow: 'hidden' }}>
-            <ComponentLibrary />
-          </div>
-        </aside>
+      {/* 场景编辑器（隐藏时保持挂载，避免 Three.js 场景丢失） */}
+      <div className={`editor-workspace ${editorMode !== 'scene' ? 'editor-workspace-hidden' : ''}`}>
+        <div className="main-content">
+          <aside className="scene-tree" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ height: '50%', overflow: 'hidden' }}>
+              <SceneTree />
+            </div>
+            <div style={{ height: '50%', overflow: 'hidden' }}>
+              <ComponentLibrary />
+            </div>
+          </aside>
 
-        {/* 中间3D视口 */}
-        <main className="viewport">
-          <EditorViewport />
-        </main>
+          <main className="viewport">
+            <EditorViewport />
+          </main>
 
-        {/* 右侧属性面板 */}
-        <aside className="property-panel">
-          <PropertyPanel />
-        </aside>
+          <aside className="property-panel">
+            <PropertyPanel />
+          </aside>
+        </div>
+
+        <footer className="status-bar">
+          <div className="flex items-center gap-4">
+            <span>工具: {currentTool}</span>
+            {selectedObject && (
+              <span>选中: {selectedObject.name}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            <span>对象数: {objects.length}</span>
+            <span>FPS: {fps}</span>
+            <span>对象: {objectCount}</span>
+            <span>三角面: {triangleCount.toLocaleString()}</span>
+            <span>顶点: {vertexCount.toLocaleString()}</span>
+          </div>
+        </footer>
+
+        <GizmoToolbar />
       </div>
 
-      {/* 底部状态栏 */}
-      <footer className="status-bar">
-        <div className="flex items-center gap-4">
-          <span>工具: {currentTool}</span>
-          {selectedObject && (
-            <span>选中: {selectedObject.name}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          <span>对象数: {objects.length}</span>
-          <span>FPS: {fps}</span>
-          <span>对象: {objectCount}</span>
-          <span>三角面: {triangleCount.toLocaleString()}</span>
-          <span>顶点: {vertexCount.toLocaleString()}</span>
-        </div>
-      </footer>
-
-      {/* Gizmo工具栏 - 固定在屏幕下方 */}
-      <GizmoToolbar />
+      {/* UI 编辑器 */}
+      <div className={`editor-workspace ${editorMode !== 'ui' ? 'editor-workspace-hidden' : ''}`}>
+        <UIEditor />
+      </div>
     </div>
     </AntApp>
     </ConfigProvider>

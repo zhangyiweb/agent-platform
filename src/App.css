@@ -168,6 +168,18 @@
   transform: translateY(0);
 }
 
+/* 编辑器工作区切换 */
+.editor-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-workspace-hidden {
+  display: none !important;
+}
+
 /* 主内容区 */
 .main-content {
   display: flex;

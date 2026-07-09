@@ -1,0 +1,110 @@
+import JSZip from 'jszip';
+import type { UIElement } from '@/types/uiEditor';
+import { bytesToDataUrl } from '@/utils/uiExportCore';
+import { useUIEditorStore } from '@/store/uiEditorStore';
+import type { UIEditorProjectFile } from '@/utils/uiEditorProjectExporter';
+import { UI_EDITOR_PROJECT_FORMAT } from '@/utils/uiEditorProjectExporter';
+
+function findUIEditorJsonPath(zip: JSZip): string | null {
+  const paths = Object.keys(zip.files).filter((p) => !zip.files[p].dir);
+  const preferred = paths.find((p) => p.endsWith('config/ui-editor.json'));
+  if (preferred) return preferred;
+  const fallback = paths.find((p) => /(^|\/)ui-editor\.json$/i.test(p));
+  return fallback ?? null;
+}
+
+function getZipRootPrefix(uiJsonPath: string): string {
+  const idx = uiJsonPath.indexOf('config/ui-editor.json');
+  return idx >= 0 ? uiJsonPath.slice(0, idx) : '';
+}
+
+function parseProjectConfig(raw: unknown): UIEditorProjectFile {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('无效的 UI 项目配置文件');
+  }
+  const config = raw as UIEditorProjectFile;
+  if (config.format !== UI_EDITOR_PROJECT_FORMAT) {
+    throw new Error('不是 UI 编排项目包（format 不匹配）');
+  }
+  if (!config.canvas || !Array.isArray(config.elements)) {
+    throw new Error('UI 项目配置缺少 canvas 或 elements');
+  }
+  return config;
+}
+
+function extFromPath(path: string): string {
+  const m = path.toLowerCase().match(/\.([a-z0-9]+)$/);
+  if (!m) return 'png';
+  const ext = m[1];
+  if (ext === 'jpeg') return 'jpg';
+  return ext;
+}
+
+async function loadImageDataUrlFromZip(zip: JSZip, rootPrefix: string, relativePath: string): Promise<string | null> {
+  const fullPath = `${rootPrefix}${relativePath}`.replace(/\/+/g, '/');
+  const file = zip.file(fullPath) ?? zip.file(relativePath);
+  if (!file) return null;
+  const buffer = await file.async('uint8array');
+  return bytesToDataUrl(buffer, extFromPath(relativePath));
+}
+
+function isRelativeAssetPath(value?: string): boolean {
+  return Boolean(value && !value.startsWith('data:') && !value.startsWith('http') && !value.startsWith('blob:'));
+}
+
+async function resolveElementAssets(
+  zip: JSZip,
+  rootPrefix: string,
+  el: UIElement
+): Promise<UIElement> {
+  const next: UIElement = { ...el, style: { ...el.style } };
+
+  if (isRelativeAssetPath(next.src)) {
+    const dataUrl = await loadImageDataUrlFromZip(zip, rootPrefix, next.src!);
+    if (dataUrl) next.src = dataUrl;
+  }
+
+  const bg = next.style.backgroundImage;
+  if (isRelativeAssetPath(bg)) {
+    const dataUrl = await loadImageDataUrlFromZip(zip, rootPrefix, bg!);
+    if (dataUrl) next.style.backgroundImage = dataUrl;
+  }
+
+  return next;
+}
+
+/** 从 ZIP UI 项目包导入（恢复 UI 编排画布） */
+export async function importUIEditorProjectZip(file: File): Promise<void> {
+  const zip = await JSZip.loadAsync(file);
+  const uiJsonPath = findUIEditorJsonPath(zip);
+  if (!uiJsonPath) {
+    throw new Error('ZIP 中未找到 config/ui-editor.json');
+  }
+  const rootPrefix = getZipRootPrefix(uiJsonPath);
+  const jsonText = await zip.file(uiJsonPath)!.async('text');
+  const config = parseProjectConfig(JSON.parse(jsonText));
+
+  const elements = await Promise.all(
+    config.elements.map((el) => resolveElementAssets(zip, rootPrefix, el))
+  );
+
+  useUIEditorStore.getState().loadProject({
+    canvasWidth: config.canvas.width,
+    canvasHeight: config.canvas.height,
+    canvasBackground: config.canvas.background,
+    elements,
+  });
+}
+
+/** 从独立 UI JSON 导入（仅恢复配置，图片保持原值） */
+export async function importUIEditorProjectJson(file: File): Promise<void> {
+  const text = await file.text();
+  const config = parseProjectConfig(JSON.parse(text));
+  useUIEditorStore.getState().loadProject({
+    canvasWidth: config.canvas.width,
+    canvasHeight: config.canvas.height,
+    canvasBackground: config.canvas.background,
+    elements: config.elements,
+  });
+}
+
