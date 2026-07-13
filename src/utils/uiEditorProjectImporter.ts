@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import type { UIElement } from '@/types/uiEditor';
+import type { UIElement, UIPage } from '@/types/uiEditor';
 import { bytesToDataUrl } from '@/utils/uiExportCore';
 import { useUIEditorStore } from '@/store/uiEditorStore';
 import type { UIEditorProjectFile } from '@/utils/uiEditorProjectExporter';
@@ -26,8 +26,10 @@ function parseProjectConfig(raw: unknown): UIEditorProjectFile {
   if (config.format !== UI_EDITOR_PROJECT_FORMAT) {
     throw new Error('不是 UI 编排项目包（format 不匹配）');
   }
-  if (!config.canvas || !Array.isArray(config.elements)) {
-    throw new Error('UI 项目配置缺少 canvas 或 elements');
+  const hasPages = Array.isArray(config.pages) && config.pages.length > 0;
+  const hasLegacy = Boolean(config.canvas && Array.isArray(config.elements));
+  if (!hasPages && !hasLegacy) {
+    throw new Error('UI 项目配置缺少 pages 或 canvas/elements');
   }
   return config;
 }
@@ -40,7 +42,11 @@ function extFromPath(path: string): string {
   return ext;
 }
 
-async function loadImageDataUrlFromZip(zip: JSZip, rootPrefix: string, relativePath: string): Promise<string | null> {
+async function loadImageDataUrlFromZip(
+  zip: JSZip,
+  rootPrefix: string,
+  relativePath: string
+): Promise<string | null> {
   const fullPath = `${rootPrefix}${relativePath}`.replace(/\/+/g, '/');
   const file = zip.file(fullPath) ?? zip.file(relativePath);
   if (!file) return null;
@@ -49,7 +55,9 @@ async function loadImageDataUrlFromZip(zip: JSZip, rootPrefix: string, relativeP
 }
 
 function isRelativeAssetPath(value?: string): boolean {
-  return Boolean(value && !value.startsWith('data:') && !value.startsWith('http') && !value.startsWith('blob:'));
+  return Boolean(
+    value && !value.startsWith('data:') && !value.startsWith('http') && !value.startsWith('blob:')
+  );
 }
 
 async function resolveElementAssets(
@@ -73,7 +81,14 @@ async function resolveElementAssets(
   return next;
 }
 
-/** 从 ZIP UI 项目包导入（恢复 UI 编排画布） */
+async function resolvePageAssets(zip: JSZip, rootPrefix: string, page: UIPage): Promise<UIPage> {
+  const elements = await Promise.all(
+    (page.elements || []).map((el) => resolveElementAssets(zip, rootPrefix, el))
+  );
+  return { ...page, elements };
+}
+
+/** 从 ZIP UI 项目包导入（恢复多画布，兼容 v1 单画布） */
 export async function importUIEditorProjectZip(file: File): Promise<void> {
   const zip = await JSZip.loadAsync(file);
   const uiJsonPath = findUIEditorJsonPath(zip);
@@ -84,14 +99,25 @@ export async function importUIEditorProjectZip(file: File): Promise<void> {
   const jsonText = await zip.file(uiJsonPath)!.async('text');
   const config = parseProjectConfig(JSON.parse(jsonText));
 
+  if (config.pages && config.pages.length > 0) {
+    const pages = await Promise.all(
+      config.pages.map((page) => resolvePageAssets(zip, rootPrefix, page))
+    );
+    useUIEditorStore.getState().loadProject({
+      pages,
+      activePageId: config.activePageId,
+    });
+    return;
+  }
+
   const elements = await Promise.all(
-    config.elements.map((el) => resolveElementAssets(zip, rootPrefix, el))
+    (config.elements || []).map((el) => resolveElementAssets(zip, rootPrefix, el))
   );
 
   useUIEditorStore.getState().loadProject({
-    canvasWidth: config.canvas.width,
-    canvasHeight: config.canvas.height,
-    canvasBackground: config.canvas.background,
+    canvasWidth: config.canvas!.width,
+    canvasHeight: config.canvas!.height,
+    canvasBackground: config.canvas!.background,
     elements,
   });
 }
@@ -100,11 +126,19 @@ export async function importUIEditorProjectZip(file: File): Promise<void> {
 export async function importUIEditorProjectJson(file: File): Promise<void> {
   const text = await file.text();
   const config = parseProjectConfig(JSON.parse(text));
+
+  if (config.pages && config.pages.length > 0) {
+    useUIEditorStore.getState().loadProject({
+      pages: config.pages,
+      activePageId: config.activePageId,
+    });
+    return;
+  }
+
   useUIEditorStore.getState().loadProject({
-    canvasWidth: config.canvas.width,
-    canvasHeight: config.canvas.height,
-    canvasBackground: config.canvas.background,
-    elements: config.elements,
+    canvasWidth: config.canvas!.width,
+    canvasHeight: config.canvas!.height,
+    canvasBackground: config.canvas!.background,
+    elements: config.elements || [],
   });
 }
-

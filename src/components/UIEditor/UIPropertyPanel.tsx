@@ -36,6 +36,8 @@ export function UIPropertyPanel() {
     canvasHeight,
     canvasBackground,
     showGrid,
+    pages,
+    activePageId,
     updateElement,
     updateElementStyle,
     updateElementHoverStyle,
@@ -45,7 +47,11 @@ export function UIPropertyPanel() {
     toggleGrid,
     clearCanvas,
     getChildren,
+    renamePage,
   } = useUIEditorStore();
+
+  const activePage = pages.find((p) => p.id === activePageId) ?? pages[0];
+  const activePageName = activePage?.name ?? '';
 
   const [activeTab, setActiveTab] = useState<'canvas' | 'element'>('canvas');
   const [cssModalOpen, setCssModalOpen] = useState(false);
@@ -139,6 +145,18 @@ export function UIPropertyPanel() {
   const canvasPanel = (
     <PropertyGroup title="画布设置">
       <div className="ui-property-row">
+        <label>名称</label>
+        <Input
+          size="small"
+          value={activePageName}
+          placeholder="画布名称"
+          onChange={(e) => {
+            if (activePageId) renamePage(activePageId, e.target.value);
+          }}
+          style={{ flex: 1 }}
+        />
+      </div>
+      <div className="ui-property-row">
         <label>尺寸</label>
         <Select
           {...selectProps}
@@ -169,7 +187,7 @@ export function UIPropertyPanel() {
         </Button>
       </div>
       <Button size="small" danger block onClick={clearCanvas} style={{ marginTop: 8 }}>
-        清空画布
+        清空当前画布
       </Button>
     </PropertyGroup>
   );

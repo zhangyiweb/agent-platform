@@ -22,6 +22,8 @@ export function UICanvas() {
     canvasBackground,
     zoom,
     showGrid,
+    pages,
+    activePageId,
     addElement,
     selectElement,
     moveElement,
@@ -32,6 +34,9 @@ export function UICanvas() {
     setZoom,
     getChildren,
     findContainerAtPoint,
+    addPage,
+    switchPage,
+    removePage,
   } = useUIEditorStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -326,9 +331,56 @@ export function UICanvas() {
   return (
     <div className="ui-canvas-viewport" ref={viewportRef}>
       <div className="ui-canvas-toolbar">
-        <span className="ui-canvas-info">
-          {canvasWidth} × {canvasHeight}
-        </span>
+        <div className="ui-canvas-toolbar-left">
+          <div className="ui-page-tabs">
+            {pages.map((page) => (
+              <button
+                key={page.id}
+                type="button"
+                className={`ui-page-tab ${page.id === activePageId ? 'active' : ''}`}
+                onClick={() => switchPage(page.id)}
+                title={page.name}
+              >
+                <span className="ui-page-tab-name">{page.name}</span>
+                {pages.length > 1 && (
+                  <span
+                    className="ui-page-tab-close"
+                    role="button"
+                    tabIndex={0}
+                    title="删除画布"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`确定删除「${page.name}」？`)) {
+                        removePage(page.id);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        if (window.confirm(`确定删除「${page.name}」？`)) {
+                          removePage(page.id);
+                        }
+                      }
+                    }}
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="ui-page-add-btn"
+            onClick={() => addPage()}
+            title="新建画布"
+          >
+            + 新建画布
+          </button>
+          <span className="ui-canvas-info">
+            {canvasWidth} × {canvasHeight}
+          </span>
+        </div>
         <div className="ui-canvas-zoom">
           <button type="button" className="ui-zoom-btn" onClick={() => setZoom(zoom - 0.1)} title="缩小">
             −

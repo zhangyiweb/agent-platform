@@ -26,18 +26,12 @@ function toVw(px: number, canvasWidth: number): string {
   return `${(px / canvasWidth) * 100}vw`;
 }
 
-/** 将相对资源路径转为相对 css/style.css 可解析的路径 */
-function toCssAssetPath(path: string): string {
-  const trimmed = path.trim().replace(/^["']|["']$/g, '');
-  if (/^(https?:|data:|\/|\.\.\/)/.test(trimmed)) return trimmed;
-  return `../${trimmed}`;
-}
-
-/** 外链样式表中，修正所有相对 url() 为相对 css/ 目录 */
-function fixCssAssetPathsForExternalSheet(css: string): string {
+/** 外链样式表中，修正所有相对 url()；prefix 默认为 ../（相对 css/ 目录） */
+function fixCssAssetPathsForExternalSheet(css: string, assetPrefix = '../'): string {
+  const prefix = assetPrefix.endsWith('/') ? assetPrefix : `${assetPrefix}/`;
   return css.replace(
     /url\((['"]?)(?!https?:|data:|\/|\.\.\/)([^)'"]+)\1\)/g,
-    (_match, quote: string, path: string) => `url(${quote}${toCssAssetPath(path)}${quote})`
+    (_match, quote: string, path: string) => `url(${quote}${prefix}${path}${quote})`
   );
 }
 
@@ -427,11 +421,15 @@ ${chartBlock}
 `;
 }
 
-/** 合并完整样式表；external 为 true 时路径相对 css/style.css（默认，用于外链 CSS） */
-export function buildUIStyleCss(bundle: UIExportBundle, options?: { external?: boolean }): string {
+/** 合并完整样式表；external 为 true 时修正相对资源路径（默认，用于外链 CSS） */
+export function buildUIStyleCss(
+  bundle: UIExportBundle,
+  options?: { external?: boolean; assetPrefix?: string }
+): string {
   const sections = [bundle.baseCss, bundle.elementCss, bundle.hoverCss].filter(Boolean);
   const css = sections.join('\n\n');
-  return options?.external === false ? css : fixCssAssetPathsForExternalSheet(css);
+  if (options?.external === false) return css;
+  return fixCssAssetPathsForExternalSheet(css, options?.assetPrefix ?? '../');
 }
 
 /** 生成标准 index.html（外链 CSS / JS） */
@@ -439,8 +437,11 @@ export function buildUIIndexHtml(
   bundle: UIExportBundle,
   canvasWidth: number,
   canvasHeight: number,
-  title = 'UI 页面'
+  title = 'UI 页面',
+  options?: { cssHref?: string; jsSrc?: string }
 ): string {
+  const cssHref = options?.cssHref ?? './css/style.css';
+  const jsSrc = options?.jsSrc ?? './js/main.js';
   const echartsScript = bundle.hasCharts
     ? `  <script src="${ECHARTS_CDN}"><\/script>\n`
     : '';
@@ -451,16 +452,159 @@ export function buildUIIndexHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(title)}</title>
-  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="${cssHref}" />
 </head>
 <body>
   <div class="ui-page" data-design-width="${canvasWidth}" data-design-height="${canvasHeight}">
     ${bundle.bodyHtml}
   </div>
-${echartsScript}  <script src="./js/main.js"><\/script>
+${echartsScript}  <script src="${jsSrc}"><\/script>
 </body>
 </html>
 `;
+}
+
+/** 将导出 HTML 片段转为 React JSX 属性约定 */
+export function htmlFragmentToJsx(html: string): string {
+  return html
+    .replace(/\bclass=/g, 'className=')
+    .replace(/\bfor=/g, 'htmlFor=')
+    .replace(/\bstroke-width=/g, 'strokeWidth=')
+    .replace(/\bstroke-linecap=/g, 'strokeLinecap=')
+    .replace(/\bstroke-linejoin=/g, 'strokeLinejoin=')
+    .replace(/\bclip-path=/g, 'clipPath=')
+    .replace(/\bfill-rule=/g, 'fillRule=');
+}
+
+/** 生成 Vue SFC */
+export function buildVueSfc(
+  bundle: UIExportBundle,
+  canvasWidth: number,
+  canvasHeight: number,
+  componentName: string,
+  styleOptions?: { external?: boolean; assetPrefix?: string }
+): string {
+  const styleCss = buildUIStyleCss(bundle, styleOptions ?? { external: false });
+  const chartSetup = bundle.hasCharts
+    ? `import { onMounted, onBeforeUnmount } from 'vue'
+import * as echarts from 'echarts'
+
+${extractChartConfigsLiteral(bundle.mainJs)}
+
+let chartInstances = []
+
+function resizeCharts() {
+  chartInstances.forEach((c) => c.resize())
+}
+
+onMounted(() => {
+  chartConfigs.forEach((cfg) => {
+    const host = document.getElementById(cfg.domId)
+    if (!host) return
+    const container = host.querySelector('.ui-el-echart')
+    if (!container) return
+    const chart = echarts.init(container)
+    chart.setOption(cfg.option)
+    chartInstances.push(chart)
+  })
+  window.addEventListener('resize', resizeCharts)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeCharts)
+  chartInstances.forEach((c) => c.dispose())
+  chartInstances = []
+})`
+    : `// 可在此绑定按钮点击、表单提交等业务逻辑`;
+
+  return `<!-- ${componentName}.vue — 由数字孪生平台 UI 编排导出 -->
+<template>
+  <div class="ui-page" data-design-width="${canvasWidth}" data-design-height="${canvasHeight}">
+${indentBlock(bundle.bodyHtml, 4)}
+  </div>
+</template>
+
+<script setup>
+${chartSetup}
+</script>
+
+<style>
+${styleCss}
+</style>
+`;
+}
+
+/** 生成 React 函数组件 */
+export function buildReactComponent(
+  bundle: UIExportBundle,
+  canvasWidth: number,
+  canvasHeight: number,
+  componentName: string,
+  cssImportPath: string
+): string {
+  const jsxBody = htmlFragmentToJsx(bundle.bodyHtml);
+  const chartConfigsDecl = bundle.hasCharts
+    ? `\n${extractChartConfigsLiteral(bundle.mainJs, true)}\n`
+    : '';
+
+  const chartBlock = bundle.hasCharts
+    ? `
+  useEffect(() => {
+    const instances: ReturnType<typeof echarts.init>[] = [];
+    chartConfigs.forEach((cfg) => {
+      const host = document.getElementById(cfg.domId);
+      if (!host) return;
+      const container = host.querySelector('.ui-el-echart') as HTMLElement | null;
+      if (!container) return;
+      const chart = echarts.init(container);
+      chart.setOption(cfg.option);
+      instances.push(chart);
+    });
+    const onResize = () => instances.forEach((c) => c.resize());
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      instances.forEach((c) => c.dispose());
+    };
+  }, []);
+`
+    : '';
+
+  return `/**
+ * ${componentName} — 由数字孪生平台 UI 编排导出
+ * 二次开发：在组件内绑定事件，或修改 chartConfigs 对接动态数据
+ */
+${bundle.hasCharts ? "import { useEffect } from 'react';\n" : ''}import './${cssImportPath}';
+${bundle.hasCharts ? "import * as echarts from 'echarts';\n" : ''}${chartConfigsDecl}
+export default function ${componentName}() {${chartBlock}
+  return (
+    <div className="ui-page" data-design-width="${canvasWidth}" data-design-height="${canvasHeight}">
+${indentBlock(jsxBody, 6)}
+    </div>
+  );
+}
+`;
+}
+
+function indentBlock(text: string, spaces: number): string {
+  const pad = ' '.repeat(spaces);
+  return text
+    .split('\n')
+    .map((line) => (line.trim() ? pad + line : line))
+    .join('\n');
+}
+
+/** 从 main.js 中提取 chartConfigs 字面量声明 */
+function extractChartConfigsLiteral(mainJs: string, asTs = false): string {
+  const match = mainJs.match(/var chartConfigs = (\[[\s\S]*?\]);/);
+  if (!match) {
+    return asTs
+      ? 'const chartConfigs: { domId: string; option: Record<string, unknown> }[] = [];'
+      : 'const chartConfigs = [];';
+  }
+  return asTs
+    ? `const chartConfigs = ${match[1]} as { domId: string; option: Record<string, unknown> }[];`
+    : `const chartConfigs = ${match[1]};`;
 }
 
 export function generateUIHtml(

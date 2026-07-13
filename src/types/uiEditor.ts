@@ -125,6 +125,16 @@ export interface UIChartConfig {
   gaugeProgressColor?: string;
 }
 
+/** UI 编排中的单个画布/页面 */
+export interface UIPage {
+  id: string;
+  name: string;
+  canvasWidth: number;
+  canvasHeight: number;
+  canvasBackground: string;
+  elements: UIElement[];
+}
+
 /** 画布尺寸预设 */
 export interface CanvasPreset {
   label: string;

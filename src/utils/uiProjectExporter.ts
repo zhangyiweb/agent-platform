@@ -1,63 +1,172 @@
 import JSZip from 'jszip';
-import type { UIElement } from '@/types/uiEditor';
+import type { UIElement, UIPage } from '@/types/uiEditor';
 import {
+  buildReactComponent,
   buildUIExportBundle,
   buildUIIndexHtml,
   buildUIStyleCss,
+  buildVueSfc,
   parseDataUrl,
+  type UIExportBundle,
 } from '@/utils/uiExportCore';
+
+export type UIExportFormat = 'html' | 'vue' | 'react';
 
 export interface UIProjectExportResult {
   filename: string;
   imageCount: number;
   elementCount: number;
+  pageCount: number;
+  format: UIExportFormat;
 }
 
-function buildReadme(canvasWidth: number, canvasHeight: number, exportTime: string): string {
-  return `# UI 编排导出项目
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
-由数字孪生平台 UI 编排编辑器于 ${exportTime} 导出。
+/** 生成安全的目录/文件名 */
+export function slugifyPageName(name: string, fallback: string): string {
+  const slug = name
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\u4e00-\u9fff-]+/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return slug || fallback;
+}
+
+/** 生成合法的组件名（PascalCase） */
+export function toComponentName(name: string, index: number): string {
+  const ascii = name.replace(/[^\w]+/g, ' ').trim();
+  const parts = ascii.split(/\s+/).filter((p) => /^[A-Za-z]/.test(p));
+  if (parts.length === 0) return `Page${index + 1}`;
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('') || `Page${index + 1}`;
+}
+
+/** 将逻辑路径 assets/images/x 替换为实际相对路径前缀 */
+function remapAssetPaths(content: string, toPrefix: string): string {
+  return content.replace(/(?:(?:\.\.\/)+)?assets\/images\//g, toPrefix);
+}
+
+function buildHtmlReadme(
+  pages: { name: string; file: string }[],
+  exportTime: string
+): string {
+  const list = pages.map((p) => `- \`${p.file}\` — ${p.name}`).join('\n');
+  return `# UI 编排导出项目（HTML）
+
+由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个画布。
 
 ## 目录结构
 
 \`\`\`
-├── index.html              # 页面入口（语义化 HTML，无内联样式）
-├── css/
-│   └── style.css           # 全局样式、元素布局、悬停效果
-├── js/
-│   └── main.js             # 入口脚本（图表初始化 + 二次开发钩子）
-└── assets/images/          # 切图与背景图资源
+├── <画布名称>.html            # 与 assets 同级，按画布命名
+├── css/<画布名称>.css
+├── js/<画布名称>.js
+└── assets/images/             # 公共图片资源
 \`\`\`
 
-## 设计尺寸
+## 页面列表
 
-${canvasWidth} × ${canvasHeight}
+${list}
 
 ## 使用方式
 
-1. **本地预览**：在项目根目录执行 \`npx serve .\`，浏览器访问提示的地址
-2. **样式修改**：编辑 \`css/style.css\`，各元素通过 \`#元素id\` 选择器定位
-3. **交互逻辑**：在 \`js/main.js\` 的「二次开发入口」区域绑定事件、对接接口
-4. **图表数据**：修改 \`js/main.js\` 中 \`chartConfigs\` 的 \`option\` 字段，或调用 \`chart.setOption()\` 动态更新
-5. **图片资源**：\`assets/images/\` 下的文件需与 HTML 保持相对路径，或自行替换为 CDN 地址
-
-## 二次开发说明
-
-- 每个元素在编辑器中可设置自定义 \`id\` 和 \`class\`，导出后可直接用于 DOM 查询
-- HTML 仅包含结构与语义标签，样式全部在 CSS 文件中
-- JS 使用 IIFE 包裹，避免全局污染；可按需改为 ES Module 或接入构建工具
+1. 本地预览：\`npx serve .\`，直接打开对应的 \`.html\` 文件
+2. 修改样式：编辑 \`css/<画布名称>.css\`
+3. 绑定逻辑：编辑 \`js/<画布名称>.js\`
 `;
 }
 
-/** 导出完整 UI 项目包（ZIP） */
+function buildVueReadme(pages: { name: string; file: string }[], exportTime: string): string {
+  const list = pages.map((p) => `- \`src/pages/${p.file}\` — ${p.name}`).join('\n');
+  return `# UI 编排导出项目（Vue 3）
+
+由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个页面。
+
+## 目录结构
+
+\`\`\`
+├── src/
+│   ├── pages/          # Vue SFC 页面组件
+│   └── assets/images/  # 图片资源
+└── README.md
+\`\`\`
+
+## 页面列表
+
+${list}
+
+## 使用方式
+
+1. 将 \`src/pages\` 与 \`src/assets\` 复制到你的 Vue 3 项目
+2. 在路由中注册页面组件
+3. 若含图表，请安装：\`npm i echarts\`
+4. 样式已写在 SFC 的 \`<style scoped>\` 中，可直接二次开发
+`;
+}
+
+function buildReactReadme(pages: { name: string; file: string }[], exportTime: string): string {
+  const list = pages.map((p) => `- \`src/pages/${p.file}\` — ${p.name}`).join('\n');
+  return `# UI 编排导出项目（React）
+
+由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个页面。
+
+## 目录结构
+
+\`\`\`
+├── src/
+│   ├── pages/          # React 组件 + CSS
+│   └── assets/images/  # 图片资源
+└── README.md
+\`\`\`
+
+## 页面列表
+
+${list}
+
+## 使用方式
+
+1. 将 \`src/pages\` 与 \`src/assets\` 复制到你的 React 项目
+2. 在路由中引入页面组件
+3. 若含图表，请安装：\`npm i echarts\`
+4. 样式在同名 \`.css\` 文件中，可按 class / id 二次开发
+`;
+}
+
+interface PackedPage {
+  page: UIPage;
+  slug: string;
+  componentName: string;
+  bundle: UIExportBundle;
+}
+
+function remapBundle(bundle: UIExportBundle, htmlPrefix: string): UIExportBundle {
+  return {
+    ...bundle,
+    bodyHtml: remapAssetPaths(bundle.bodyHtml, htmlPrefix),
+    elementCss: remapAssetPaths(bundle.elementCss, htmlPrefix),
+    hoverCss: remapAssetPaths(bundle.hoverCss, htmlPrefix),
+    baseCss: remapAssetPaths(bundle.baseCss, htmlPrefix),
+  };
+}
+
+/** 导出完整 UI 项目包（支持多页面 + html/vue/react） */
 export async function exportUIProjectPackage(
-  elements: UIElement[],
-  canvasWidth: number,
-  canvasHeight: number,
-  canvasBackground: string
+  pages: UIPage[],
+  format: UIExportFormat = 'html'
 ): Promise<UIProjectExportResult> {
+  if (pages.length === 0) {
+    throw new Error('没有可导出的页面');
+  }
+
   const timestamp = Date.now();
-  const folderName = `ui-project-${timestamp}`;
+  const folderName = `ui-project-${format}-${timestamp}`;
   const zip = new JSZip();
   const root = zip.folder(folderName);
   if (!root) throw new Error('无法创建 ZIP 目录');
@@ -65,9 +174,11 @@ export async function exportUIProjectPackage(
   const imageFiles = new Map<string, Uint8Array>();
   const imagePathCache = new Map<string, string>();
   let imageCount = 0;
+  let elementCount = 0;
 
+  /** 统一逻辑路径：assets/images/xxx */
   const resolveImage = (elementId: string, dataUrl: string, kind: 'src' | 'background'): string => {
-    const cacheKey = `${elementId}:${kind}`;
+    const cacheKey = `${elementId}:${kind}:${dataUrl.slice(0, 80)}`;
     const cached = imagePathCache.get(cacheKey);
     if (cached) return cached;
 
@@ -78,35 +189,128 @@ export async function exportUIProjectPackage(
     const filename = `${kind}-${shortId}.${parsed.ext}`;
     const relativePath = `assets/images/${filename}`;
     imagePathCache.set(cacheKey, relativePath);
-    imageFiles.set(relativePath, parsed.bytes);
-    imageCount += 1;
+    if (!imageFiles.has(relativePath)) {
+      imageFiles.set(relativePath, parsed.bytes);
+      imageCount += 1;
+    }
     return relativePath;
   };
 
-  const bundle = buildUIExportBundle(elements, canvasWidth, canvasHeight, canvasBackground, {
-    resolveImage,
-  });
+  const usedSlugs = new Set<string>();
+  const packed = pages.map((page, index) => {
+    elementCount += page.elements.length;
+    let slug = slugifyPageName(page.name, `画布${index + 1}`);
+    if (usedSlugs.has(slug)) slug = `${slug}-${index + 1}`;
+    usedSlugs.add(slug);
 
-  imageFiles.forEach((bytes, path) => {
-    root.file(path, bytes);
+    const bundle = buildUIExportBundle(
+      page.elements,
+      page.canvasWidth,
+      page.canvasHeight,
+      page.canvasBackground,
+      { resolveImage }
+    );
+
+    return {
+      page,
+      slug,
+      componentName: toComponentName(page.name, index),
+      bundle,
+    };
   });
 
   const exportTime = new Date().toISOString();
-  const title = `UI 页面 ${new Date(exportTime).toLocaleString('zh-CN')}`;
+  const assetsBase = format === 'html' ? 'assets/images/' : 'src/assets/images/';
 
-  root.file('index.html', buildUIIndexHtml(bundle, canvasWidth, canvasHeight, title));
-  root.file('css/style.css', buildUIStyleCss(bundle));
-  root.file('js/main.js', bundle.mainJs);
-  root.file('README.md', buildReadme(canvasWidth, canvasHeight, exportTime));
+  imageFiles.forEach((bytes, logicalPath) => {
+    const filename = logicalPath.replace(/^assets\/images\//, '');
+    root.file(`${assetsBase}${filename}`, bytes);
+  });
+
+  if (format === 'html') {
+    const pageMeta: { name: string; file: string }[] = [];
+
+    packed.forEach((p) => {
+      // HTML 与 assets 同级：img 用 assets/images/；CSS 在 css/ 下用 ../assets/images/
+      const htmlBundle = remapBundle(p.bundle, 'assets/images/');
+      const cssBundle = remapBundle(p.bundle, '../assets/images/');
+      const htmlFile = `${p.slug}.html`;
+      const cssFile = `css/${p.slug}.css`;
+      const jsFile = `js/${p.slug}.js`;
+
+      root.file(
+        htmlFile,
+        buildUIIndexHtml(htmlBundle, p.page.canvasWidth, p.page.canvasHeight, p.page.name, {
+          cssHref: `./${cssFile}`,
+          jsSrc: `./${jsFile}`,
+        })
+      );
+      root.file(cssFile, buildUIStyleCss(cssBundle, { external: false }));
+      root.file(jsFile, p.bundle.mainJs);
+      pageMeta.push({ name: p.page.name, file: htmlFile });
+    });
+
+    root.file('README.md', buildHtmlReadme(pageMeta, exportTime));
+  } else if (format === 'vue') {
+    const pageMeta: { name: string; file: string }[] = [];
+    packed.forEach((p) => {
+      const vueBundle = remapBundle(p.bundle, '../assets/images/');
+      const sfc = buildVueSfc(
+        vueBundle,
+        p.page.canvasWidth,
+        p.page.canvasHeight,
+        p.componentName,
+        { external: false }
+      );
+      const file = `${p.componentName}.vue`;
+      root.file(`src/pages/${file}`, sfc);
+      pageMeta.push({ name: p.page.name, file });
+    });
+    root.file('README.md', buildVueReadme(pageMeta, exportTime));
+  } else {
+    const pageMeta: { name: string; file: string }[] = [];
+    packed.forEach((p) => {
+      const reactBundle = remapBundle(p.bundle, '../assets/images/');
+      const css = buildUIStyleCss(reactBundle, { external: false });
+      const tsx = buildReactComponent(
+        reactBundle,
+        p.page.canvasWidth,
+        p.page.canvasHeight,
+        p.componentName,
+        `${p.componentName}.css`
+      );
+      root.file(`src/pages/${p.componentName}.tsx`, tsx);
+      root.file(`src/pages/${p.componentName}.css`, css);
+      pageMeta.push({ name: p.page.name, file: `${p.componentName}.tsx` });
+    });
+    root.file('README.md', buildReactReadme(pageMeta, exportTime));
+  }
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const filename = `${folderName}.zip`;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, filename);
 
-  return { filename, imageCount, elementCount: elements.length };
+  return { filename, imageCount, elementCount, pageCount: pages.length, format };
+}
+
+/** @deprecated 兼容旧单页调用 */
+export async function exportUIProjectPackageLegacy(
+  elements: UIElement[],
+  canvasWidth: number,
+  canvasHeight: number,
+  canvasBackground: string
+): Promise<UIProjectExportResult> {
+  return exportUIProjectPackage(
+    [
+      {
+        id: 'page_1',
+        name: '页面 1',
+        canvasWidth,
+        canvasHeight,
+        canvasBackground,
+        elements,
+      },
+    ],
+    'html'
+  );
 }

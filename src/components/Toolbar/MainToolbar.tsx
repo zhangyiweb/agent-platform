@@ -5,6 +5,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useModelLoader } from '@/hooks/useModelLoader';
 import { ExportPanel } from '@/components/Panels/ExportPanel';
 import { ModelPickerModal } from '@/components/Panels/ModelPickerModal';
+import { UIExportModal } from '@/components/UIEditor/UIExportModal';
 import { saveEditorProject } from '@/utils/editorProjectExporter';
 import {
   hasEditorSceneContent,
@@ -19,12 +20,12 @@ import {
   type ModelResolution,
 } from '@/utils/polyhaven';
 import { useUIEditorStore } from '@/store/uiEditorStore';
-import { exportUIProjectPackage } from '@/utils/uiProjectExporter';
 
 export function Toolbar() {
   const notify = useEditorNotify();
   const { editorMode, setEditorMode } = useEditorStore();
   const [showExport, setShowExport] = useState(false);
+  const [showUIExport, setShowUIExport] = useState(false);
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [modelResolution, setModelResolution] = useState<ModelResolution>(DEFAULT_MODEL_RESOLUTION);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -73,20 +74,8 @@ export function Toolbar() {
     }
   };
 
-  const handleExportProject = async () => {
-    const { elements, canvasWidth, canvasHeight, canvasBackground } = useUIEditorStore.getState();
-    if (elements.length === 0) {
-      notify.warning('画布为空，请先添加 UI 元素');
-      return;
-    }
-    try {
-      const result = await exportUIProjectPackage(elements, canvasWidth, canvasHeight, canvasBackground);
-      const detail = result.imageCount > 0 ? `，含 ${result.imageCount} 张图片` : '';
-      notify.success(`项目包已导出（${result.filename}${detail}）`);
-    } catch (error) {
-      console.error(error);
-      notify.error(error instanceof Error ? error.message : '项目包导出失败');
-    }
+  const handleExportProject = () => {
+    setShowUIExport(true);
   };
 
   const handleExportComplete = () => {
@@ -98,7 +87,11 @@ export function Toolbar() {
     try {
       if (editorMode === 'ui') {
         const result = await saveUIEditorProject();
-        const detail = result.imageCount > 0 ? `，含 ${result.imageCount} 张图片` : '';
+        const parts = [
+          result.pageCount > 1 ? `${result.pageCount} 个画布` : null,
+          result.imageCount > 0 ? `${result.imageCount} 张图片` : null,
+        ].filter(Boolean);
+        const detail = parts.length > 0 ? `（${parts.join('，')}）` : '';
         notify.success(`UI 项目已保存：${result.filename}${detail}`);
       } else {
         const result = await saveEditorProject();
@@ -364,6 +357,8 @@ export function Toolbar() {
       {showExport && editorMode === 'scene' && (
         <ExportPanel onClose={handleExportComplete} />
       )}
+
+      <UIExportModal open={showUIExport} onClose={() => setShowUIExport(false)} />
     </header>
   );
 }
