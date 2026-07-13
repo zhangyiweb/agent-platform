@@ -21,12 +21,12 @@ const FORMAT_OPTIONS: { value: UIExportFormat; label: string; desc: string }[] =
   {
     value: 'vue',
     label: 'Vue',
-    desc: 'Vue 3 SFC 组件，可复制到 Vue 项目二次开发',
+    desc: '按画布名称生成 .vue，与 assets 同级',
   },
   {
     value: 'react',
     label: 'React',
-    desc: 'React + CSS 组件，可复制到 React 项目二次开发',
+    desc: '按画布名称生成 .tsx/.css，与 assets 同级',
   },
 ];
 

@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import type { UIElement, UIPage } from '@/types/uiEditor';
 import { parseDataUrl } from '@/utils/uiExportCore';
 import { useUIEditorStore } from '@/store/uiEditorStore';
+import { slugifyPageName } from '@/utils/uiProjectExporter';
 
 export const UI_EDITOR_PROJECT_FORMAT = 'ui-editor-project';
 export const UI_EDITOR_PROJECT_VERSION = '2.0.0';
@@ -20,6 +21,13 @@ export interface UIEditorProjectFile {
     background: string;
   };
   elements?: UIElement[];
+}
+
+export interface UIEditorSaveResult {
+  filename: string;
+  imageCount: number;
+  pageCount: number;
+  pageNames: string[];
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -42,13 +50,45 @@ function cloneElementsForExport(elements: UIElement[]): UIElement[] {
   }));
 }
 
+function buildSaveReadme(pages: UIPage[], exportTime: string): string {
+  const list = pages
+    .map((p, i) => `${i + 1}. **${p.name}** — ${p.canvasWidth}×${p.canvasHeight}，${p.elements.length} 个元素`)
+    .join('\n');
+  return `# UI 编排项目包
+
+保存时间：${exportTime}
+
+本压缩包可由数字孪生平台「UI 编排 → 打开项目」重新载入。
+
+## 画布列表
+
+${list}
+
+## 目录说明
+
+\`\`\`
+├── config/ui-editor.json   # 多画布项目配置
+└── assets/images/          # 图片资源
+\`\`\`
+`;
+}
+
 /** 保存可重新导入的 UI 编排项目包（ZIP，含多画布） */
-export async function saveUIEditorProject(): Promise<{ filename: string; imageCount: number; pageCount: number }> {
+export async function saveUIEditorProject(): Promise<UIEditorSaveResult> {
   const pages = useUIEditorStore.getState().getPagesSnapshot();
   const activePageId = useUIEditorStore.getState().activePageId;
 
+  if (pages.length === 0) {
+    throw new Error('没有可保存的画布');
+  }
+
   const timestamp = Date.now();
-  const folderName = `ui-editor-${timestamp}`;
+  const nameSlug = slugifyPageName(pages[0].name, 'ui-project');
+  const folderName =
+    pages.length === 1
+      ? `ui-editor-${nameSlug}-${timestamp}`
+      : `ui-editor-${nameSlug}-等${pages.length}页-${timestamp}`;
+
   const zip = new JSZip();
   const root = zip.folder(folderName);
   if (!root) throw new Error('无法创建 ZIP 目录');
@@ -82,6 +122,7 @@ export async function saveUIEditorProject(): Promise<{ filename: string; imageCo
 
   const exportedPages: UIPage[] = pages.map((page) => ({
     ...page,
+    name: page.name.trim() || '未命名画布',
     elements: cloneElementsForExport(page.elements).map((el) => {
       const next: UIElement = { ...el, style: { ...el.style } };
       if (next.src?.startsWith('data:')) {
@@ -103,18 +144,26 @@ export async function saveUIEditorProject(): Promise<{ filename: string; imageCo
     root.file(path, bytes);
   });
 
+  const exportTime = new Date().toISOString();
   const projectFile: UIEditorProjectFile = {
     format: UI_EDITOR_PROJECT_FORMAT,
     version: UI_EDITOR_PROJECT_VERSION,
-    exportTime: new Date().toISOString(),
+    exportTime,
     activePageId,
     pages: exportedPages,
   };
 
   root.file('config/ui-editor.json', JSON.stringify(projectFile, null, 2));
+  root.file('README.md', buildSaveReadme(exportedPages, exportTime));
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const filename = `${folderName}.zip`;
   downloadBlob(blob, filename);
-  return { filename, imageCount, pageCount: exportedPages.length };
+
+  return {
+    filename,
+    imageCount,
+    pageCount: exportedPages.length,
+    pageNames: exportedPages.map((p) => p.name),
+  };
 }

@@ -87,12 +87,15 @@ export function Toolbar() {
     try {
       if (editorMode === 'ui') {
         const result = await saveUIEditorProject();
+        const names =
+          result.pageNames.length <= 3
+            ? result.pageNames.join('、')
+            : `${result.pageNames.slice(0, 3).join('、')} 等`;
         const parts = [
-          result.pageCount > 1 ? `${result.pageCount} 个画布` : null,
+          `${result.pageCount} 个画布（${names}）`,
           result.imageCount > 0 ? `${result.imageCount} 张图片` : null,
         ].filter(Boolean);
-        const detail = parts.length > 0 ? `（${parts.join('，')}）` : '';
-        notify.success(`UI 项目已保存：${result.filename}${detail}`);
+        notify.success(`UI 项目已保存：${result.filename}（${parts.join('，')}）`);
       } else {
         const result = await saveEditorProject();
         notify.success(`项目已保存：${result.filename}`);
@@ -114,13 +117,21 @@ export function Toolbar() {
     try {
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (editorMode === 'ui') {
+        let result;
         if (ext === 'zip') {
-          await importUIEditorProjectZip(file);
+          result = await importUIEditorProjectZip(file);
         } else if (ext === 'json') {
-          await importUIEditorProjectJson(file);
+          result = await importUIEditorProjectJson(file);
         } else {
           throw new Error('仅支持 .zip UI 项目包或 .json UI 配置');
         }
+        const names =
+          result.pageNames.length <= 3
+            ? result.pageNames.join('、')
+            : `${result.pageNames.slice(0, 3).join('、')} 等`;
+        notify.success(
+          `UI 项目已打开：${file.name}（${result.pageCount} 个画布：${names}，共 ${result.elementCount} 个元素）`
+        );
       } else {
         if (ext === 'zip') {
           await importEditorProjectZip(file);
@@ -129,8 +140,8 @@ export function Toolbar() {
         } else {
           throw new Error('仅支持 .zip 项目包或 .json 场景配置');
         }
+        notify.success(`项目已打开：${file.name}`);
       }
-      notify.success(`项目已打开：${file.name}`);
     } catch (error) {
       console.error(error);
       notify.error(error instanceof Error ? error.message : '项目打开失败');
@@ -154,11 +165,13 @@ export function Toolbar() {
       editorMode === 'ui' ? useUIEditorStore.getState().hasContent() : hasEditorSceneContent();
 
     if (hasUnsavedContent) {
+      const pageCount = editorMode === 'ui' ? useUIEditorStore.getState().pages.length : 0;
       Modal.confirm({
         title: '打开项目',
-        content: editorMode === 'ui'
-          ? '当前 UI 画布尚未保存，打开项目将覆盖现有 UI 内容。是否继续？'
-          : '当前场景尚未保存，打开项目将覆盖现有内容。是否继续？',
+        content:
+          editorMode === 'ui'
+            ? `当前有 ${pageCount} 个画布尚未保存，打开项目将覆盖全部画布内容。是否继续？`
+            : '当前场景尚未保存，打开项目将覆盖现有内容。是否继续？',
         okText: '继续打开',
         cancelText: '取消',
         onOk: openFile,

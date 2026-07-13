@@ -5,6 +5,12 @@ import { useUIEditorStore } from '@/store/uiEditorStore';
 import type { UIEditorProjectFile } from '@/utils/uiEditorProjectExporter';
 import { UI_EDITOR_PROJECT_FORMAT } from '@/utils/uiEditorProjectExporter';
 
+export interface UIEditorImportResult {
+  pageCount: number;
+  pageNames: string[];
+  elementCount: number;
+}
+
 function findUIEditorJsonPath(zip: JSZip): string | null {
   const paths = Object.keys(zip.files).filter((p) => !zip.files[p].dir);
   const preferred = paths.find((p) => p.endsWith('config/ui-editor.json'));
@@ -85,15 +91,30 @@ async function resolvePageAssets(zip: JSZip, rootPrefix: string, page: UIPage): 
   const elements = await Promise.all(
     (page.elements || []).map((el) => resolveElementAssets(zip, rootPrefix, el))
   );
-  return { ...page, elements };
+  return {
+    ...page,
+    name: page.name?.trim() || '未命名画布',
+    canvasWidth: page.canvasWidth || 1920,
+    canvasHeight: page.canvasHeight || 1080,
+    canvasBackground: page.canvasBackground || '#0f1117',
+    elements,
+  };
+}
+
+function summarizePages(pages: UIPage[]): UIEditorImportResult {
+  return {
+    pageCount: pages.length,
+    pageNames: pages.map((p) => p.name),
+    elementCount: pages.reduce((sum, p) => sum + p.elements.length, 0),
+  };
 }
 
 /** 从 ZIP UI 项目包导入（恢复多画布，兼容 v1 单画布） */
-export async function importUIEditorProjectZip(file: File): Promise<void> {
+export async function importUIEditorProjectZip(file: File): Promise<UIEditorImportResult> {
   const zip = await JSZip.loadAsync(file);
   const uiJsonPath = findUIEditorJsonPath(zip);
   if (!uiJsonPath) {
-    throw new Error('ZIP 中未找到 config/ui-editor.json');
+    throw new Error('ZIP 中未找到 config/ui-editor.json，请选择「保存项目」生成的 UI 项目包');
   }
   const rootPrefix = getZipRootPrefix(uiJsonPath);
   const jsonText = await zip.file(uiJsonPath)!.async('text');
@@ -107,38 +128,57 @@ export async function importUIEditorProjectZip(file: File): Promise<void> {
       pages,
       activePageId: config.activePageId,
     });
-    return;
+    return summarizePages(pages);
   }
 
   const elements = await Promise.all(
     (config.elements || []).map((el) => resolveElementAssets(zip, rootPrefix, el))
   );
 
-  useUIEditorStore.getState().loadProject({
+  const legacyPage: UIPage = {
+    id: 'page_imported',
+    name: '页面 1',
     canvasWidth: config.canvas!.width,
     canvasHeight: config.canvas!.height,
     canvasBackground: config.canvas!.background,
     elements,
+  };
+
+  useUIEditorStore.getState().loadProject({
+    pages: [legacyPage],
   });
+  return summarizePages([legacyPage]);
 }
 
 /** 从独立 UI JSON 导入（仅恢复配置，图片保持原值） */
-export async function importUIEditorProjectJson(file: File): Promise<void> {
+export async function importUIEditorProjectJson(file: File): Promise<UIEditorImportResult> {
   const text = await file.text();
   const config = parseProjectConfig(JSON.parse(text));
 
   if (config.pages && config.pages.length > 0) {
+    const pages = config.pages.map((page) => ({
+      ...page,
+      name: page.name?.trim() || '未命名画布',
+      elements: page.elements || [],
+    }));
     useUIEditorStore.getState().loadProject({
-      pages: config.pages,
+      pages,
       activePageId: config.activePageId,
     });
-    return;
+    return summarizePages(pages);
   }
 
-  useUIEditorStore.getState().loadProject({
+  const legacyPage: UIPage = {
+    id: 'page_imported',
+    name: '页面 1',
     canvasWidth: config.canvas!.width,
     canvasHeight: config.canvas!.height,
     canvasBackground: config.canvas!.background,
     elements: config.elements || [],
+  };
+
+  useUIEditorStore.getState().loadProject({
+    pages: [legacyPage],
   });
+  return summarizePages([legacyPage]);
 }

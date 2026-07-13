@@ -40,12 +40,15 @@ export function slugifyPageName(name: string, fallback: string): string {
   return slug || fallback;
 }
 
-/** 生成合法的组件名（PascalCase） */
+/** 生成合法的组件标识符（用于 React 函数名等；文件名请用 slug） */
 export function toComponentName(name: string, index: number): string {
-  const ascii = name.replace(/[^\w]+/g, ' ').trim();
-  const parts = ascii.split(/\s+/).filter((p) => /^[A-Za-z]/.test(p));
-  if (parts.length === 0) return `Page${index + 1}`;
-  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('') || `Page${index + 1}`;
+  const slug = slugifyPageName(name, `画布${index + 1}`).replace(/-/g, '_');
+  // 中文或字母开头均可作为标识符
+  if (/^[\u4e00-\u9fff]/.test(slug)) return slug;
+  if (/^[A-Za-z_$]/.test(slug)) {
+    return slug.charAt(0).toUpperCase() + slug.slice(1);
+  }
+  return `Page${index + 1}`;
 }
 
 /** 将逻辑路径 assets/images/x 替换为实际相对路径前缀 */
@@ -84,18 +87,16 @@ ${list}
 }
 
 function buildVueReadme(pages: { name: string; file: string }[], exportTime: string): string {
-  const list = pages.map((p) => `- \`src/pages/${p.file}\` — ${p.name}`).join('\n');
+  const list = pages.map((p) => `- \`${p.file}\` — ${p.name}`).join('\n');
   return `# UI 编排导出项目（Vue 3）
 
-由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个页面。
+由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个画布。
 
 ## 目录结构
 
 \`\`\`
-├── src/
-│   ├── pages/          # Vue SFC 页面组件
-│   └── assets/images/  # 图片资源
-└── README.md
+├── <画布名称>.vue             # 与 assets 同级，按画布命名
+└── assets/images/             # 公共图片资源
 \`\`\`
 
 ## 页面列表
@@ -104,26 +105,25 @@ ${list}
 
 ## 使用方式
 
-1. 将 \`src/pages\` 与 \`src/assets\` 复制到你的 Vue 3 项目
+1. 将 \`.vue\` 文件与 \`assets\` 复制到你的 Vue 3 项目
 2. 在路由中注册页面组件
 3. 若含图表，请安装：\`npm i echarts\`
-4. 样式已写在 SFC 的 \`<style scoped>\` 中，可直接二次开发
+4. 样式已写在 SFC 的 \`<style>\` 中，可直接二次开发
 `;
 }
 
 function buildReactReadme(pages: { name: string; file: string }[], exportTime: string): string {
-  const list = pages.map((p) => `- \`src/pages/${p.file}\` — ${p.name}`).join('\n');
+  const list = pages.map((p) => `- \`${p.file}\` — ${p.name}`).join('\n');
   return `# UI 编排导出项目（React）
 
-由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个页面。
+由数字孪生平台于 ${exportTime} 导出，共 ${pages.length} 个画布。
 
 ## 目录结构
 
 \`\`\`
-├── src/
-│   ├── pages/          # React 组件 + CSS
-│   └── assets/images/  # 图片资源
-└── README.md
+├── <画布名称>.tsx             # 与 assets 同级，按画布命名
+├── <画布名称>.css
+└── assets/images/             # 公共图片资源
 \`\`\`
 
 ## 页面列表
@@ -132,7 +132,7 @@ ${list}
 
 ## 使用方式
 
-1. 将 \`src/pages\` 与 \`src/assets\` 复制到你的 React 项目
+1. 将 \`.tsx\` / \`.css\` 与 \`assets\` 复制到你的 React 项目
 2. 在路由中引入页面组件
 3. 若含图表，请安装：\`npm i echarts\`
 4. 样式在同名 \`.css\` 文件中，可按 class / id 二次开发
@@ -220,7 +220,8 @@ export async function exportUIProjectPackage(
   });
 
   const exportTime = new Date().toISOString();
-  const assetsBase = format === 'html' ? 'assets/images/' : 'src/assets/images/';
+  // HTML / Vue / React 统一：资源与页面文件同级
+  const assetsBase = 'assets/images/';
 
   imageFiles.forEach((bytes, logicalPath) => {
     const filename = logicalPath.replace(/^assets\/images\//, '');
@@ -231,7 +232,6 @@ export async function exportUIProjectPackage(
     const pageMeta: { name: string; file: string }[] = [];
 
     packed.forEach((p) => {
-      // HTML 与 assets 同级：img 用 assets/images/；CSS 在 css/ 下用 ../assets/images/
       const htmlBundle = remapBundle(p.bundle, 'assets/images/');
       const cssBundle = remapBundle(p.bundle, '../assets/images/');
       const htmlFile = `${p.slug}.html`;
@@ -254,34 +254,34 @@ export async function exportUIProjectPackage(
   } else if (format === 'vue') {
     const pageMeta: { name: string; file: string }[] = [];
     packed.forEach((p) => {
-      const vueBundle = remapBundle(p.bundle, '../assets/images/');
+      const vueBundle = remapBundle(p.bundle, './assets/images/');
       const sfc = buildVueSfc(
         vueBundle,
         p.page.canvasWidth,
         p.page.canvasHeight,
-        p.componentName,
+        p.page.name,
         { external: false }
       );
-      const file = `${p.componentName}.vue`;
-      root.file(`src/pages/${file}`, sfc);
+      const file = `${p.slug}.vue`;
+      root.file(file, sfc);
       pageMeta.push({ name: p.page.name, file });
     });
     root.file('README.md', buildVueReadme(pageMeta, exportTime));
   } else {
     const pageMeta: { name: string; file: string }[] = [];
     packed.forEach((p) => {
-      const reactBundle = remapBundle(p.bundle, '../assets/images/');
+      const reactBundle = remapBundle(p.bundle, './assets/images/');
       const css = buildUIStyleCss(reactBundle, { external: false });
       const tsx = buildReactComponent(
         reactBundle,
         p.page.canvasWidth,
         p.page.canvasHeight,
         p.componentName,
-        `${p.componentName}.css`
+        `${p.slug}.css`
       );
-      root.file(`src/pages/${p.componentName}.tsx`, tsx);
-      root.file(`src/pages/${p.componentName}.css`, css);
-      pageMeta.push({ name: p.page.name, file: `${p.componentName}.tsx` });
+      root.file(`${p.slug}.tsx`, tsx);
+      root.file(`${p.slug}.css`, css);
+      pageMeta.push({ name: p.page.name, file: `${p.slug}.tsx` });
     });
     root.file('README.md', buildReactReadme(pageMeta, exportTime));
   }
