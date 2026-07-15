@@ -78,6 +78,28 @@ export function Toolbar() {
     setShowUIExport(true);
   };
 
+  const handleExportDeployPackage = async () => {
+    setSavingProject(true);
+    try {
+      const { exportProjectPackage } = await import('@/utils/projectPackageExporter');
+      const result = await exportProjectPackage({ mergeUI: true });
+      const detail = [
+        result.hasUIOverlay ? '含 UI 叠层' : null,
+        result.uiBindingCount > 0 ? `${result.uiBindingCount} 个交互` : null,
+        result.hasModel ? '含模型' : null,
+        result.hasCameraTour ? '含漫游' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      notify.success(`可部署项目包已导出${detail ? `（${detail}）` : ''}`);
+    } catch (error) {
+      console.error(error);
+      notify.error(error instanceof Error ? error.message : '项目包导出失败');
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
   const handleExportComplete = () => {
     setShowExport(false);
   };
@@ -233,6 +255,18 @@ export function Toolbar() {
               </svg>
               <span>UI 编排</span>
             </button>
+            <button
+              type="button"
+              className={`editor-mode-btn ${editorMode === 'preview' ? 'active' : ''}`}
+              onClick={() => setEditorMode('preview')}
+              title="场景 + UI 叠层，点击按钮驱动 3D"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 3H14V13H2V3Z" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M5 8H11M8 5V11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <span>联动预览</span>
+            </button>
           </div>
         </div>
 
@@ -253,7 +287,60 @@ export function Toolbar() {
             className="hidden"
           />
 
-          {editorMode === 'scene' ? (
+          {editorMode === 'ui' ? (
+            <>
+              <button
+                onClick={handleOpenProjectClick}
+                disabled={openingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{openingProject ? '打开中…' : '打开项目'}</span>
+              </button>
+
+              <button
+                onClick={handleSaveProject}
+                disabled={savingProject}
+                className="toolbar-btn btn-import"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>{savingProject ? '保存中…' : '保存项目'}</span>
+              </button>
+
+              <button
+                onClick={handleExportProject}
+                className="toolbar-btn btn-export"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 2H10L13 5V13C13 13.5523 12.5523 14 12 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2Z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+                <span>导出项目</span>
+              </button>
+            </>
+          ) : editorMode === 'preview' ? (
+            <button
+              type="button"
+              onClick={handleExportDeployPackage}
+              disabled={savingProject}
+              className="toolbar-btn btn-export"
+              title="导出可直接部署的完整项目包（3D + UI + 交互）"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 10V2M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span>{savingProject ? '导出中…' : '导出项目'}</span>
+            </button>
+          ) : (
             <>
               <button
                 onClick={handleOpenProjectClick}
@@ -314,45 +401,6 @@ export function Toolbar() {
                 <span>导出</span>
               </button>
             </>
-          ) : (
-            <>
-              <button
-                onClick={handleOpenProjectClick}
-                disabled={openingProject}
-                className="toolbar-btn btn-import"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-                <span>{openingProject ? '打开中…' : '打开项目'}</span>
-              </button>
-
-              <button
-                onClick={handleSaveProject}
-                disabled={savingProject}
-                className="toolbar-btn btn-import"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                  <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-                <span>{savingProject ? '保存中…' : '保存项目'}</span>
-              </button>
-
-              <button
-                onClick={handleExportProject}
-                className="toolbar-btn btn-export"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 2H10L13 5V13C13 13.5523 12.5523 14 12 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2Z" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                </svg>
-                <span>导出项目</span>
-              </button>
-            </>
           )}
         </div>
       </div>
@@ -367,7 +415,7 @@ export function Toolbar() {
         onSelect={handlePolyhavenModelSelect}
       />
 
-      {showExport && editorMode === 'scene' && (
+      {showExport && (editorMode === 'scene' || editorMode === 'preview') && (
         <ExportPanel onClose={handleExportComplete} />
       )}
 

@@ -4,11 +4,48 @@ import {
   EXPORT_PACKAGE_DEFAULT_CAMERA_POSITION,
   EXPORT_PACKAGE_DEFAULT_CONTROLS_TARGET,
 } from '@/config/exportDefaults';
+import { buildExportedSceneApiScript } from '@/utils/exportedSceneApiTemplate';
 
 const THREE_VERSION = '0.185.0';
 const QUARKS_VERSION = '0.17.1';
+const ECHARTS_CDN = 'https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js';
 
-export function buildIndexHtml(title: string): string {
+export interface IndexHtmlOptions {
+  hasUIOverlay?: boolean;
+  hasCharts?: boolean;
+  uiBodyHtml?: string;
+  designWidth?: number;
+  designHeight?: number;
+}
+
+export function buildIndexHtml(title: string, options: IndexHtmlOptions = {}): string {
+  const overlay =
+    options.hasUIOverlay && options.uiBodyHtml
+      ? `
+  <div
+    id="ui-overlay"
+    class="ui-page"
+    data-design-width="${options.designWidth ?? 1920}"
+    data-design-height="${options.designHeight ?? 1080}"
+  >
+    ${options.uiBodyHtml}
+  </div>`
+      : '';
+
+  const uiCss = options.hasUIOverlay
+    ? `  <link rel="stylesheet" href="./css/ui-overlay.css" />\n`
+    : '';
+  const echartsScript = options.hasCharts
+    ? `  <script src="${ECHARTS_CDN}"><\/script>\n`
+    : '';
+  const uiBridge = options.hasUIOverlay
+    ? `  <script src="./js/ui-bridge.js"><\/script>\n`
+    : '';
+  const uiCharts = options.hasCharts
+    ? `  <script src="./js/ui-charts.js"><\/script>\n`
+    : '';
+  const dataBridge = `  <script src="./js/dataBridge.js"><\/script>\n`;
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -16,7 +53,7 @@ export function buildIndexHtml(title: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${title}</title>
   <link rel="stylesheet" href="./css/style.css" />
-  <script type="importmap">
+${uiCss}  <script type="importmap">
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js",
@@ -29,9 +66,9 @@ export function buildIndexHtml(title: string): string {
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <div id="loading">加载场景中…</div>
-  <script type="module" src="./js/main.js"></script>
-</body>
+  <div id="loading">加载场景中…</div>${overlay}
+${echartsScript}  <script type="module" src="./js/main.js"><\/script>
+${uiBridge}${uiCharts}${dataBridge}</body>
 </html>
 `;
 }
@@ -408,6 +445,8 @@ async function bootstrap() {
   });
 
   hideLoading();
+
+  ${buildExportedSceneApiScript(hasCameraTour)}
 }
 
 bootstrap().catch((err) => {
@@ -425,23 +464,30 @@ export function buildReadme(exportTime: string): string {
 ## 目录结构
 
 \`\`\`
-├── index.html          # 入口页面
-├── css/style.css       # 样式
+├── index.html          # 入口页面（可含 UI 大屏叠层）
+├── css/
+│   ├── style.css       # 基础样式
+│   └── ui-overlay.css  # UI 叠层样式（如有合并 UI）
 ├── js/
-│   ├── main.js         # Three.js 场景启动脚本（ES Module）
-│   ├── particleRuntime.js # 粒子特效运行时（three.quarks）
+│   ├── main.js         # Three.js 场景启动 + window.sceneApi
+│   ├── ui-bridge.js    # UI 事件 → sceneApi（如有合并 UI）
+│   ├── dataBridge.js   # 后台数据接入预留（读 config/runtime.json）
+│   ├── particleRuntime.js # 粒子特效运行时
 │   ├── postProcess.js  # 全屏后期处理
-│   └── cameraTour.js   # 相机漫游工具包（无 UI，支持站点/一镜到底两种模式）
+│   └── cameraTour.js   # 相机漫游工具包
 ├── config/
-│   ├── scene.json           # 相机、灯光、雾效、渲染器、后期等完整配置
-│   ├── camera-tour.json     # 当前激活漫游路线（main.js 默认加载）
-│   ├── camera-tour-index.json # 全部漫游路线索引（如有）
-│   └── camera-tours/        # 各条漫游路线 JSON（如有）
+│   ├── scene.json           # 场景完整配置
+│   ├── runtime.json         # UI/数据源运行时配置（预留后台）
+│   ├── ui-bindings.json     # UI 事件绑定表（如有）
+│   ├── camera-tour.json
+│   ├── camera-tour-index.json
+│   └── camera-tours/
 ├── docs/
-│   └── camera-tour-guide.md # 漫游配置字段说明与 API 速查
+│   └── camera-tour-guide.md
 ├── assets/
 │   ├── models/scene.glb
 │   ├── textures/
+│   ├── ui/             # UI 图片资源（如有）
 │   └── hdr/
 └── README.md
 \`\`\`
@@ -462,6 +508,14 @@ python -m http.server 8080
 
 ## 二次开发说明
 
+- **场景控制 API**：场景加载完成后挂载 \`window.sceneApi\`，UI 按钮通过 \`js/ui-bridge.js\` 自动绑定。
+  - \`sceneApi.setVisible(id, true/false)\` 显隐模型
+  - \`sceneApi.focus(id)\` 相机飞向模型
+  - \`sceneApi.select(id)\` 高亮选中
+  - \`sceneApi.setCamera(position, target)\` 设置视角
+  - \`sceneApi.playTour(tourId?)\` / \`pauseTour\` / \`stopTour\` 漫游控制
+  - \`sceneApi.dispatch(action)\` 执行与编辑器一致的 UIAction
+- **后台数据（预留）**：编辑 \`config/runtime.json\`，将 \`dataSource.enabled\` 设为 \`true\` 并填写 WebSocket/HTTP 地址；\`js/dataBridge.js\` 会接入并派发 \`dt-point-patch\` 事件，后续可接测点绑定。
 - **改模型**：替换 \`assets/models/scene.glb\`，或在 \`js/main.js\` 中加载更多资源。
 - **改灯光 / 相机**：编辑 \`config/scene.json\`，\`runtimeLights\` 为场景中实际灯光数据。默认相机位置 \`(15, 10, 15)\`，控制点 \`(0, 0, 0)\`。
 - **改 HDR**：替换 \`assets/hdr/\` 下文件，并更新 \`scene.json\` 中 \`assets.hdr\` 路径。

@@ -47,6 +47,33 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.toolbar-center .editor-mode-switch {
+  pointer-events: auto;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Logo样式 */
@@ -99,18 +126,6 @@
   color: rgba(255, 255, 255, 0.7);
   font-weight: 400;
   letter-spacing: 1px;
-}
-
-.toolbar-center {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 /* 工具栏按钮 */
@@ -178,6 +193,48 @@
 
 .editor-workspace-hidden {
   display: none !important;
+}
+
+/* 联动预览：隐藏左右侧栏，视口铺满 */
+.editor-workspace-preview .scene-tree,
+.editor-workspace-preview .property-panel,
+.editor-workspace-preview .status-bar,
+.editor-workspace-preview .gizmo-toolbar,
+.editor-workspace-preview .gizmo-toolbar-wrap {
+  display: none !important;
+}
+
+.editor-workspace-preview .viewport {
+  position: relative;
+  flex: 1;
+  width: 100%;
+}
+
+.preview-mode-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  pointer-events: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #e5e7eb;
+  background: rgba(15, 17, 23, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  animation: preview-banner-fade 4s ease forwards;
+}
+
+@keyframes preview-banner-fade {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* 主内容区 */

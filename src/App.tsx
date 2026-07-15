@@ -5,6 +5,7 @@ import { useSceneStore } from '@/store/sceneStore'
 import { useEditorStore } from '@/store/editorStore'
 import { useLightStore } from '@/store/lightStore'
 import { EditorViewport } from '@/components/Viewport/EditorViewport'
+import { SceneUIPreviewOverlay } from '@/components/Viewport/SceneUIPreviewOverlay'
 import { SceneTree } from '@/components/Panels/SceneTree'
 import { ComponentLibrary } from '@/components/Panels/ComponentLibrary'
 import { PropertyPanel } from '@/components/Panels/PropertyPanel'
@@ -22,7 +23,18 @@ function App() {
   const { selectedIds, objects } = useSceneStore();
   const { lights } = useLightStore();
   const { currentTool, editorMode } = useEditorStore();
-  
+  const [showPreviewBanner, setShowPreviewBanner] = useState(false);
+
+  useEffect(() => {
+    if (editorMode !== 'preview') {
+      setShowPreviewBanner(false);
+      return;
+    }
+    setShowPreviewBanner(true);
+    const timer = window.setTimeout(() => setShowPreviewBanner(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [editorMode]);
+
   // 统计信息
   const [fps, setFps] = useState(60);
   const [objectCount, setObjectCount] = useState(0);
@@ -124,8 +136,12 @@ function App() {
       {/* 顶部工具栏 */}
       <Toolbar />
 
-      {/* 场景编辑器（隐藏时保持挂载，避免 Three.js 场景丢失） */}
-      <div className={`editor-workspace ${editorMode !== 'scene' ? 'editor-workspace-hidden' : ''}`}>
+      {/* 场景编辑器（隐藏时保持挂载，避免 Three.js 场景丢失；preview 共用视口） */}
+      <div
+        className={`editor-workspace ${
+          editorMode !== 'scene' && editorMode !== 'preview' ? 'editor-workspace-hidden' : ''
+        } ${editorMode === 'preview' ? 'editor-workspace-preview' : ''}`}
+      >
         <div className="main-content">
           <aside className="scene-tree" style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ height: '50%', overflow: 'hidden' }}>
@@ -138,6 +154,10 @@ function App() {
 
           <main className="viewport">
             <EditorViewport />
+            {editorMode === 'preview' && <SceneUIPreviewOverlay />}
+            {editorMode === 'preview' && showPreviewBanner && (
+              <div className="preview-mode-banner">联动预览中 · 点击 UI 可驱动场景 · Esc / 工具栏退出</div>
+            )}
           </main>
 
           <aside className="property-panel">

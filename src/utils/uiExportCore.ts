@@ -14,7 +14,8 @@ function escapeHtml(text: string): string {
 }
 
 function escapeStyleValue(value: string | number): string {
-  return String(value).replace(/"/g, '&quot;');
+  // 写入 <style> textContent，不能用 HTML 实体（&quot; 不会被解析成引号）
+  return String(value).replace(/\n/g, ' ');
 }
 
 function toPercent(px: number, base: number): string {
@@ -100,9 +101,11 @@ function styleToCss(
   add('transition', 'all 0.2s ease');
 
   if (style.backgroundImage) {
-    const img = style.backgroundImage.startsWith('url(')
-      ? style.backgroundImage
-      : `url(${style.backgroundImage})`;
+    const raw = style.backgroundImage.trim();
+    // data URL 禁止再用 ; split 逻辑破坏；统一加引号包住
+    const img = raw.startsWith('url(')
+      ? raw
+      : `url("${raw.replace(/"/g, '%22')}")`;
     add('background-image', img);
     add('background-size', style.backgroundSize || 'cover');
     add('background-position', style.backgroundPosition || 'center');
@@ -167,14 +170,33 @@ function buildInputInnerStyle(el: UIElement, ctx: StyleContext): string {
   return rules.join('; ');
 }
 
-/** 将声明字符串格式化为可读的 CSS 规则块 */
+/** 将声明字符串格式化为可读的 CSS 规则块（不拆分 url() 内的分号，避免 data:image/png;base64 被截断） */
 function formatCssRule(selector: string, declarations: string): string {
-  const props = declarations
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => `  ${part};`)
-    .join('\n');
+  const parts: string[] = [];
+  let buf = '';
+  let urlDepth = 0;
+
+  for (let i = 0; i < declarations.length; i += 1) {
+    const ch = declarations[i];
+    const prev = buf.slice(-3).toLowerCase();
+    if (ch === '(' && (prev.endsWith('url') || /url\s*$/i.test(buf))) {
+      urlDepth += 1;
+    } else if (ch === ')' && urlDepth > 0) {
+      urlDepth -= 1;
+    }
+
+    if (ch === ';' && urlDepth === 0) {
+      const trimmed = buf.trim();
+      if (trimmed) parts.push(trimmed);
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  const last = buf.trim();
+  if (last) parts.push(last);
+
+  const props = parts.map((part) => `  ${part};`).join('\n');
   return `${selector} {\n${props}\n}`;
 }
 
@@ -192,17 +214,19 @@ export function buildUIExportBundle(
   canvasWidth: number,
   canvasHeight: number,
   canvasBackground: string,
-  ctx?: UIExportContext
+  ctx?: UIExportContext,
+  options?: { includeHidden?: boolean }
 ): UIExportBundle {
   const prepared = elements.map((el) => resolveElementAssets(el, ctx));
   const elementMap = new Map(prepared.map((el) => [el.id, el]));
   const elementCssRules: string[] = [];
   const hoverRules: string[] = [];
   const chartInits: { domId: string; option: Record<string, unknown> }[] = [];
+  const includeHidden = options?.includeHidden === true;
 
   function getChildren(parentId: string | null): UIElement[] {
     return prepared
-      .filter((el) => el.parentId === parentId && el.visible)
+      .filter((el) => el.parentId === parentId && (includeHidden || el.visible))
       .sort((a, b) => a.zIndex - b.zIndex);
   }
 
@@ -228,10 +252,13 @@ export function buildUIExportBundle(
     };
 
     const childHtml = getChildren(el.id).map(renderNode).join('\n');
-    const baseStyle = buildElementStyle(el, styleCtx);
-    const cls = getElementExportClasses(el);
+    const hasActions = Array.isArray(el.actions) && el.actions.length > 0;
+    const cls = `${getElementExportClasses(el)}${hasActions ? ' ui-interactive' : ''}`;
     const domId = getElementDomId(el);
     const selector = `#${domId}`;
+    const dataAttrs = `data-ui-id="${escapeHtml(el.id)}"`;
+    const hiddenStyle = includeHidden && !el.visible ? '; display: none; visibility: hidden' : '';
+    const baseStyle = `${buildElementStyle(el, styleCtx)}${hiddenStyle}`;
 
     if (hasHoverStyle(el.hoverStyle)) {
       const hoverDeclarations = buildHoverCssRules(el.hoverStyle!);
@@ -246,35 +273,35 @@ export function buildUIExportBundle(
         const imgStyle = `width: 100%; height: 100%; object-fit: ${el.style.objectFit || 'cover'}; display: block`;
         pushElementRule(`${selector} img`, imgStyle);
         const imgTag = el.src ? `    <img src="${el.src}" alt="${escapeHtml(el.name)}" />` : '';
-        return `<div id="${domId}" class="${cls}">\n${imgTag}\n${childHtml}\n  </div>`;
+        return `<div id="${domId}" class="${cls}" ${dataAttrs}>\n${imgTag}\n${childHtml}\n  </div>`;
       }
       case 'button': {
         pushElementRule(
           selector,
           `${baseStyle}; border: none; outline: none; appearance: none; -webkit-appearance: none; cursor: pointer`
         );
-        return `<button id="${domId}" type="button" class="${cls}">\n    <span class="ui-el-text">${escapeHtml(el.content || '按钮')}</span>\n${childHtml}\n  </button>`;
+        return `<button id="${domId}" type="button" class="${cls}" ${dataAttrs}>\n    <span class="ui-el-text">${escapeHtml(el.content || '按钮')}</span>\n${childHtml}\n  </button>`;
       }
       case 'input': {
         pushElementRule(selector, baseStyle);
         const inputStyle = buildInputInnerStyle(el, styleCtx);
         pushElementRule(`${selector} .ui-el-native-input`, inputStyle);
-        return `<div id="${domId}" class="${cls}">\n    <input type="text" class="ui-el-native-input" placeholder="${escapeHtml(el.content || '请输入')}" />\n${childHtml}\n  </div>`;
+        return `<div id="${domId}" class="${cls}" ${dataAttrs}>\n    <input type="text" class="ui-el-native-input" placeholder="${escapeHtml(el.content || '请输入')}" />\n${childHtml}\n  </div>`;
       }
       case 'text':
         pushElementRule(selector, baseStyle);
-        return `<div id="${domId}" class="${cls}">\n    <span class="ui-el-text">${escapeHtml(el.content || '')}</span>\n${childHtml}\n  </div>`;
+        return `<div id="${domId}" class="${cls}" ${dataAttrs}>\n    <span class="ui-el-text">${escapeHtml(el.content || '')}</span>\n${childHtml}\n  </div>`;
       case 'echart': {
         pushElementRule(selector, baseStyle);
         const presetId = parseEchartPresetId(el.content);
         const option = getEchartOption(presetId, el.chartConfig) as Record<string, unknown>;
         chartInits.push({ domId, option });
         pushElementRule(`${selector} .ui-el-echart`, 'width: 100%; height: 100%');
-        return `<div id="${domId}" class="${cls} ui-el-echart-host">\n    <div class="ui-el-echart"></div>\n${childHtml}\n  </div>`;
+        return `<div id="${domId}" class="${cls} ui-el-echart-host" ${dataAttrs}>\n    <div class="ui-el-echart"></div>\n${childHtml}\n  </div>`;
       }
       default:
         pushElementRule(selector, baseStyle);
-        return `<div id="${domId}" class="${cls}">\n${childHtml}\n  </div>`;
+        return `<div id="${domId}" class="${cls}" ${dataAttrs}>\n${childHtml}\n  </div>`;
     }
   }
 

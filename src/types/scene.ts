@@ -52,8 +52,8 @@ export interface SceneState {
 // 编辑器工具类型
 export type EditorTool = 'select' | 'move' | 'rotate' | 'scale';
 
-// 编辑器模式
-export type EditorMode = 'scene' | 'ui';
+// 编辑器模式（preview：场景 + UI 叠层联动预览）
+export type EditorMode = 'scene' | 'ui' | 'preview';
 
 // 编辑器状态类型
 export interface EditorState {

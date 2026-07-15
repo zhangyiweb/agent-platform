@@ -42,11 +42,25 @@ import {
   type ExportedTextureAssetEntry,
   type PolyhavenModelSource,
 } from '@/utils/exportExternalAssets';
+import { useUIEditorStore } from '@/store/uiEditorStore';
+import { buildUIExportBundle, buildUIStyleCss } from '@/utils/uiExportCore';
+import {
+  buildDataBridgeJs,
+  buildRuntimeConfig,
+  buildUIBridgeJs,
+  buildUIOverlayExtraCss,
+  collectUIBindings,
+} from '@/utils/uiInteractionExport';
 
 declare global {
   interface Window {
     __hdrExportSource?: HdrDownloadSource | null;
   }
+}
+
+export interface ProjectPackageExportOptions {
+  /** 是否合并当前 UI 画布为大屏叠层（默认：有 UI 内容则合并） */
+  mergeUI?: boolean;
 }
 
 export interface ProjectPackageExportResult {
@@ -62,6 +76,8 @@ export interface ProjectPackageExportResult {
   cameraTourMode?: 'stop' | 'spline';
   hasParticles: boolean;
   particleCount: number;
+  hasUIOverlay: boolean;
+  uiBindingCount: number;
 }
 
 async function exportGlbBuffer(
@@ -244,8 +260,22 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-/** 导出完整 HTML/CSS/JS 项目包（ZIP） */
-export async function exportProjectPackage(): Promise<ProjectPackageExportResult> {
+function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; ext: string } | null {
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl);
+  if (!match) return null;
+  const mime = match[1].toLowerCase();
+  const bin = atob(match[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  const ext =
+    mime.includes('png') ? 'png' : mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'bin';
+  return { bytes, ext };
+}
+
+/** 导出完整 HTML/CSS/JS 项目包（ZIP），可选合并 UI 大屏叠层 */
+export async function exportProjectPackage(
+  options: ProjectPackageExportOptions = {}
+): Promise<ProjectPackageExportResult> {
   const scene = (window as any).__editorScene as THREE.Scene | undefined;
   if (!scene) {
     throw new Error('场景尚未初始化，请等待编辑器加载完成后再导出');
@@ -258,6 +288,25 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
   if (!root) {
     throw new Error('无法创建 ZIP 目录');
   }
+
+  // 将当前 UI 编辑态写回 pages，保证导出拿到最新 actions
+  useUIEditorStore.setState((state) => {
+    const page = state.pages.find((p) => p.id === state.activePageId);
+    if (!page) return state;
+    return {
+      pages: state.pages.map((p) =>
+        p.id === state.activePageId
+          ? {
+              ...p,
+              elements: state.elements,
+              canvasWidth: state.canvasWidth,
+              canvasHeight: state.canvasHeight,
+              canvasBackground: state.canvasBackground,
+            }
+          : p
+      ),
+    };
+  });
 
   const baseConfig = generateSceneConfig();
   const rawParticles = baseConfig.editor.particles ?? {};
@@ -341,8 +390,97 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
 
   const exportTitle = `数字孪生场景 ${new Date(baseConfig.exportTime).toLocaleString('zh-CN')}`;
 
+  // —— 合并 UI 叠层 ——
+  const uiState = useUIEditorStore.getState();
+  const activePage =
+    uiState.pages.find((p) => p.id === uiState.activePageId) ?? uiState.pages[0] ?? null;
+  const uiElements = activePage?.elements?.length ? activePage.elements : uiState.elements;
+  const shouldMergeUI =
+    options.mergeUI !== false && Array.isArray(uiElements) && uiElements.length > 0;
+
+  let hasUIOverlay = false;
+  let uiBindingCount = 0;
+  let uiBodyHtml = '';
+  let hasCharts = false;
+  let designWidth = 1920;
+  let designHeight = 1080;
+
+  if (shouldMergeUI && activePage) {
+    designWidth = activePage.canvasWidth || uiState.canvasWidth;
+    designHeight = activePage.canvasHeight || uiState.canvasHeight;
+
+    const imageFiles: Array<{ path: string; data: Uint8Array }> = [];
+    let imageSeq = 0;
+    const exportCtx = {
+      resolveImage: (elementId: string, dataUrl: string, kind: 'src' | 'background') => {
+        const parsed = dataUrlToBytes(dataUrl);
+        if (!parsed) return dataUrl;
+        imageSeq += 1;
+        const filename = `${elementId}_${kind}_${imageSeq}.${parsed.ext}`;
+        const path = `assets/ui/${filename}`;
+        imageFiles.push({ path, data: parsed.bytes });
+        return `../${path}`;
+      },
+    };
+
+    const bundle = buildUIExportBundle(
+      uiElements,
+      designWidth,
+      designHeight,
+      'transparent',
+      exportCtx,
+      { includeHidden: true }
+    );
+    imageFiles.forEach(({ path, data }) => root.file(path, data));
+
+    const overlayCss =
+      buildUIStyleCss(bundle, { external: true, assetPrefix: '../' }) +
+      '\n' +
+      buildUIOverlayExtraCss();
+    root.file('css/ui-overlay.css', overlayCss);
+
+    const bindings = collectUIBindings(uiElements);
+    uiBindingCount = bindings.length;
+    root.file('config/ui-bindings.json', JSON.stringify(bindings, null, 2));
+    root.file('js/ui-bridge.js', buildUIBridgeJs(bindings));
+
+    // 图表初始化仍走 UI bundle 中的逻辑，单独落一份轻量图表脚本
+    if (bundle.hasCharts) {
+      root.file('js/ui-charts.js', bundle.mainJs);
+    }
+
+    uiBodyHtml = bundle.bodyHtml;
+    hasCharts = bundle.hasCharts;
+    hasUIOverlay = true;
+  }
+
+  root.file(
+    'config/runtime.json',
+    JSON.stringify(
+      buildRuntimeConfig({
+        uiEnabled: hasUIOverlay,
+        pageId: activePage?.id,
+        pageName: activePage?.name,
+        designWidth,
+        designHeight,
+      }),
+      null,
+      2
+    )
+  );
+  root.file('js/dataBridge.js', buildDataBridgeJs());
+
   root.file('config/scene.json', JSON.stringify(projectConfig, null, 2));
-  root.file('index.html', buildIndexHtml(exportTitle));
+  root.file(
+    'index.html',
+    buildIndexHtml(exportTitle, {
+      hasUIOverlay,
+      hasCharts,
+      uiBodyHtml,
+      designWidth,
+      designHeight,
+    })
+  );
   root.file('css/style.css', buildStyleCss());
   root.file('js/main.js', buildMainJs(Boolean(exportTour)));
   root.file('js/cameraTour.js', buildCameraTourJs());
@@ -367,5 +505,7 @@ export async function exportProjectPackage(): Promise<ProjectPackageExportResult
     cameraTourMode: exportTour?.mode,
     hasParticles,
     particleCount,
+    hasUIOverlay,
+    uiBindingCount,
   };
 }

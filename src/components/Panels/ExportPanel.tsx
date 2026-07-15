@@ -389,6 +389,9 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
             }${result.cameraTourCount > 1 ? ` 等${result.cameraTourCount}条` : ''})`
           : null,
         result.hasParticles ? `含 ${result.particleCount} 个粒子发射器` : null,
+        result.hasUIOverlay
+          ? `含 UI 叠层${result.uiBindingCount > 0 ? `（${result.uiBindingCount} 个交互）` : ''}`
+          : null,
       ].filter(Boolean).join(' · ');
       notify.success(`项目包已导出（${detail}）`);
     } catch (error) {
@@ -420,7 +423,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
             <ExportTile
               icon="🚀"
               title="项目包"
-              desc="完整 HTML 可运行项目，含 GLB、贴图/HDR、漫游工具包"
+              desc="完整可部署项目：3D + UI 叠层 + sceneApi 交互 + 数据桥预留"
               theme={THEMES.purple}
               action={
                 <TileButton

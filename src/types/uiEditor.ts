@@ -1,3 +1,5 @@
+import type { UIAction } from '@/types/uiInteraction';
+
 /** UI 组件类型 */
 export type UIElementType = 'container' | 'text' | 'image' | 'button' | 'rect' | 'input' | 'echart';
 
@@ -65,6 +67,8 @@ export interface UIElement {
   domId?: string;
   /** 导出用自定义 class（空格分隔多个） */
   className?: string;
+  /** UI → 场景交互动作（点击等） */
+  actions?: UIAction[];
 }
 
 /** ECharts 图表配置 */

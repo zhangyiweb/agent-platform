@@ -18,6 +18,7 @@ import type { UIChartConfig } from '@/types/uiEditor';
 import { getElementDomId } from '@/utils/uiElementDom';
 import { PropertyGroup } from './PropertyGroup';
 import { EchartPropertyPanels } from './EchartPropertyPanels';
+import { UIInteractionPanel } from './UIInteractionPanel';
 
 const SELECT_POPUP_CLASSNAMES = { popup: { root: 'export-panel-select-popup' } };
 
@@ -53,7 +54,7 @@ export function UIPropertyPanel() {
   const activePage = pages.find((p) => p.id === activePageId) ?? pages[0];
   const activePageName = activePage?.name ?? '';
 
-  const [activeTab, setActiveTab] = useState<'canvas' | 'element'>('canvas');
+  const [activeTab, setActiveTab] = useState<'canvas' | 'element' | 'interaction'>('canvas');
   const [cssModalOpen, setCssModalOpen] = useState(false);
   const [fontCustomMode, setFontCustomMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -731,15 +732,22 @@ export function UIPropertyPanel() {
     <div className="ui-property-empty">选中画布上的元素以编辑组件属性</div>
   );
 
+  const interactionPanel = selected ? (
+    <UIInteractionPanel elementId={selected.id} actions={selected.actions} />
+  ) : (
+    <div className="ui-property-empty">选中画布上的元素以配置场景交互</div>
+  );
+
   return (
     <div className="ui-property-panel">
       <Tabs
         className="ui-property-tabs"
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'canvas' | 'element')}
+        onChange={(key) => setActiveTab(key as 'canvas' | 'element' | 'interaction')}
         items={[
           { key: 'canvas', label: '画布', children: canvasPanel },
           { key: 'element', label: '组件', children: elementPanel },
+          { key: 'interaction', label: '交互', children: interactionPanel },
         ]}
       />
 

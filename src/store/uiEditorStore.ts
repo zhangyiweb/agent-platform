@@ -61,6 +61,11 @@ function cloneElements(elements: UIElement[]): UIElement[] {
     style: { ...el.style },
     hoverStyle: el.hoverStyle ? { ...el.hoverStyle } : undefined,
     chartConfig: el.chartConfig ? { ...el.chartConfig } : undefined,
+    actions: el.actions?.map((a) => ({
+      ...a,
+      targetIds: a.targetIds ? [...a.targetIds] : undefined,
+      params: a.params ? { ...a.params } : undefined,
+    })),
   }));
 }
 

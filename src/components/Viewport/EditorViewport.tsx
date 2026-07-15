@@ -178,7 +178,7 @@ export function EditorViewport() {
   const isLightTransformDraggingRef = useRef(false);
 
   const { camera, backgroundColor, objects, selectedIds, selectObject, deselectAll, updateObject, registerThreeObject, addObject } = useSceneStore();
-  const { gridVisible, axesVisible, currentTool } = useEditorStore();
+  const { gridVisible, axesVisible, currentTool, editorMode } = useEditorStore();
   const { handleFileImport } = useModelLoader();
   const handleFileImportRef = useRef(handleFileImport);
   handleFileImportRef.current = handleFileImport;
@@ -1120,12 +1120,19 @@ export function EditorViewport() {
     }
   }, [applyPostProcessEffect]);
 
-  // 窗口大小调整
+  const lastViewportSizeRef = useRef({ w: 0, h: 0 });
+
+  // 窗口大小调整（尺寸未变则跳过，避免 ResizeObserver ↔ setSize 死循环卡死）
   const handleResize = useCallback(() => {
     if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
 
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
+    if (width < 2 || height < 2) return;
+    if (width === lastViewportSizeRef.current.w && height === lastViewportSizeRef.current.h) {
+      return;
+    }
+    lastViewportSizeRef.current = { w: width, h: height };
 
     cameraRef.current.aspect = width / height;
     cameraRef.current.updateProjectionMatrix();
@@ -1135,6 +1142,37 @@ export function EditorViewport() {
       composerRef.current.setSize(width, height);
     }
   }, []);
+
+  // 从 UI 编排切回场景/预览时，display:none → 可见后需强制重算尺寸，否则画布塌成纯色
+  useEffect(() => {
+    if (editorMode !== 'scene' && editorMode !== 'preview') return;
+    // 允许重算：清掉缓存尺寸
+    lastViewportSizeRef.current = { w: 0, h: 0 };
+    const kick = () => handleResize();
+    kick();
+    const t1 = window.setTimeout(kick, 50);
+    const t2 = window.setTimeout(kick, 200);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [editorMode, handleResize]);
+
+  // 视口尺寸变化（侧栏显隐等）：防抖，避免预览切换布局时风暴
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let timer = 0;
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => handleResize(), 32);
+    });
+    ro.observe(el);
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [handleResize]);
 
   // 初始化与渲染循环（仅挂载一次，避免重复创建 WebGL 上下文）
   useEffect(() => {
@@ -1211,16 +1249,31 @@ export function EditorViewport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 视口生命周期内只初始化一次
   }, []);
 
-  // 控制网格和坐标轴显示
+  // 控制网格、坐标轴、灯光 Helper、变换 Gizmo（联动预览中全部隐藏）
   useEffect(() => {
     if (!sceneRef.current) return;
+    const isPreview = editorMode === 'preview';
 
     const grid = sceneRef.current.getObjectByName('grid');
     const axes = sceneRef.current.getObjectByName('axes');
+    if (grid) grid.visible = !isPreview && gridVisible;
+    if (axes) axes.visible = !isPreview && axesVisible;
 
-    if (grid) grid.visible = gridVisible;
-    if (axes) axes.visible = axesVisible;
-  }, [gridVisible, axesVisible]);
+    sceneRef.current.traverse((child) => {
+      if (child.name === 'grid' || child.name === 'axes') return;
+      const isHelper =
+        child.name.startsWith('helper_') || child.userData?.isEditorHelper === true;
+      if (isHelper) {
+        child.visible = !isPreview;
+      }
+    });
+
+    const tc = transformControlsRef.current;
+    if (tc) {
+      tc.visible = !isPreview;
+      tc.enabled = !isPreview;
+    }
+  }, [gridVisible, axesVisible, editorMode]);
 
   // 更新TransformControls工具模式
   useEffect(() => {

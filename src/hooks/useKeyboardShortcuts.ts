@@ -26,13 +26,18 @@ function applyTransformSnapshot(snapshot: TransformSnapshot) {
 }
 
 export function useKeyboardShortcuts() {
-  const { setTool, toggleGrid, toggleAxes } = useEditorStore();
+  const { setTool, toggleGrid, toggleAxes, editorMode, setEditorMode } = useEditorStore();
   const { undo, redo, canUndo, canRedo } = useHistoryStore();
   const { selectedIds, removeObject, getThreeObject } = useSceneStore();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === 'Escape' && editorMode === 'preview') {
+        setEditorMode('scene');
         return;
       }
 
@@ -104,5 +109,18 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setTool, toggleGrid, toggleAxes, undo, redo, canUndo, canRedo, selectedIds, removeObject, getThreeObject]);
+  }, [
+    setTool,
+    toggleGrid,
+    toggleAxes,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    selectedIds,
+    removeObject,
+    getThreeObject,
+    editorMode,
+    setEditorMode,
+  ]);
 }
