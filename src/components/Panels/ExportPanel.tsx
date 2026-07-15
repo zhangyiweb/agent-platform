@@ -377,7 +377,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
     if (!scene) return;
     setPackageExporting(true);
     try {
-      const result = await exportProjectPackage();
+      const result = await exportProjectPackage({ mergeUI: false });
       const detail = [
         result.hasModel ? '含模型' : '无模型',
         result.hasHdr ? '含 HDR' : '无 HDR',
@@ -389,14 +389,11 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
             }${result.cameraTourCount > 1 ? ` 等${result.cameraTourCount}条` : ''})`
           : null,
         result.hasParticles ? `含 ${result.particleCount} 个粒子发射器` : null,
-        result.hasUIOverlay
-          ? `含 UI 叠层${result.uiBindingCount > 0 ? `（${result.uiBindingCount} 个交互）` : ''}`
-          : null,
       ].filter(Boolean).join(' · ');
-      notify.success(`项目包已导出（${detail}）`);
+      notify.success(`场景运行包已导出（${detail}）`);
     } catch (error) {
-      console.error('项目包导出失败:', error);
-      notify.error(error instanceof Error ? error.message : '项目包导出失败');
+      console.error('场景运行包导出失败:', error);
+      notify.error(error instanceof Error ? error.message : '场景运行包导出失败');
     } finally {
       setPackageExporting(false);
     }
@@ -422,8 +419,8 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
           <div className="grid grid-cols-3 gap-4">
             <ExportTile
               icon="🚀"
-              title="项目包"
-              desc="完整可部署项目：3D + UI 叠层 + sceneApi 交互 + 数据桥预留"
+              title="场景运行包"
+              desc="仅 3D 场景的可运行 HTML/JS 包（不含 UI 叠层；完整部署请用联动预览「导出部署包」）"
               theme={THEMES.purple}
               action={
                 <TileButton

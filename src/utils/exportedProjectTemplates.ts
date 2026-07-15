@@ -58,15 +58,24 @@ ${uiCss}  <script type="importmap">
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/",
+      "quarks.core": "https://unpkg.com/quarks.core@${QUARKS_VERSION}/dist/quarks.core.esm.js",
       "three.quarks": "https://unpkg.com/three.quarks@${QUARKS_VERSION}/dist/three.quarks.esm.js",
       "postprocessing": "https://unpkg.com/postprocessing@6.38.2/build/index.js"
     }
   }
   </script>
 </head>
-<body>
+<body class="app-booting">
   <canvas id="canvas"></canvas>
-  <div id="loading">加载场景中…</div>${overlay}
+  <div id="loading" class="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-backdrop"></div>
+    <div class="app-loading-card">
+      <div class="app-loading-ring" aria-hidden="true"></div>
+      <div class="app-loading-title">数字孪生</div>
+      <div class="app-loading-text" id="loading-text">正在加载场景…</div>
+      <div class="app-loading-bar" aria-hidden="true"><span></span></div>
+    </div>
+  </div>${overlay}
 ${echartsScript}  <script type="module" src="./js/main.js"><\/script>
 ${uiBridge}${uiCharts}${dataBridge}</body>
 </html>
@@ -84,32 +93,136 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0f0f0f;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #07090f;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
 #canvas {
   display: block;
   width: 100vw;
   height: 100vh;
+  opacity: 0;
+  transition: opacity 0.45s ease;
 }
 
-#loading {
+#ui-overlay {
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+
+body.app-booting #canvas,
+body.app-booting #ui-overlay {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body:not(.app-booting) #canvas {
+  opacity: 1;
+}
+
+body:not(.app-booting) #ui-overlay {
+  opacity: 1;
+}
+
+.app-loading {
   position: fixed;
   inset: 0;
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.75);
-  color: #e5e7eb;
-  font-size: 14px;
-  z-index: 20;
-  transition: opacity 0.3s;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
 }
 
-#loading.hidden {
+.app-loading-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(37, 99, 235, 0.22), transparent 70%),
+    linear-gradient(160deg, #0a0e18 0%, #121826 45%, #0b1020 100%);
+}
+
+.app-loading-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+  padding: 28px 32px 24px;
+  border-radius: 16px;
+  background: rgba(18, 22, 34, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+.app-loading-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #60a5fa;
+  border-right-color: #38bdf8;
+  animation: app-loading-spin 0.85s linear infinite;
+}
+
+.app-loading-title {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #e5e7eb;
+}
+
+.app-loading-text {
+  font-size: 12px;
+  color: #94a3b8;
+  letter-spacing: 0.04em;
+}
+
+.app-loading-bar {
+  margin-top: 6px;
+  width: 140px;
+  height: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.app-loading-bar > span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3b82f6, #22d3ee);
+  animation: app-loading-bar 1.2s ease-in-out infinite;
+}
+
+.app-loading.hidden {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+}
+
+.app-loading.is-error .app-loading-ring {
+  animation: none;
+  border-color: rgba(248, 113, 113, 0.35);
+  border-top-color: #f87171;
+}
+
+.app-loading.is-error .app-loading-text {
+  color: #fca5a5;
+}
+
+@keyframes app-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes app-loading-bar {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
 }
 `;
 }
@@ -144,7 +257,18 @@ const TONE_MAPPING = {
 };
 
 function hideLoading() {
+  document.body.classList.remove('app-booting');
   loadingEl.classList.add('hidden');
+  window.setTimeout(() => {
+    if (loadingEl.parentNode) loadingEl.remove();
+  }, 520);
+}
+
+function setLoadingError(message) {
+  loadingEl.classList.add('is-error');
+  const textEl = document.getElementById('loading-text');
+  if (textEl) textEl.textContent = message;
+  else loadingEl.textContent = message;
 }
 
 function parseColor(hex) {
@@ -451,7 +575,7 @@ async function bootstrap() {
 
 bootstrap().catch((err) => {
   console.error(err);
-  loadingEl.textContent = '场景加载失败，请查看控制台';
+  setLoadingError('场景加载失败，请查看控制台');
 });
 `;
 }
@@ -533,7 +657,7 @@ python -m http.server 8080
 
 ## 依赖
 
-运行时通过 importmap 从 jsDelivr 加载 Three.js r${THREE_VERSION}、从 unpkg 加载 three.quarks 与 postprocessing，无需本地 npm install 即可预览。
+运行时通过 importmap 从 jsDelivr 加载 Three.js r${THREE_VERSION}、从 unpkg 加载 quarks.core / three.quarks 与 postprocessing，无需本地 npm install 即可预览。
 生产环境建议改为本地依赖或打包工具（Vite / Webpack）。
 `;
 }

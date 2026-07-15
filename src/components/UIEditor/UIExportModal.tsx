@@ -70,7 +70,7 @@ export function UIExportModal({ open, onClose }: UIExportModalProps) {
 
   return (
     <Modal
-      title="导出 UI 项目"
+      title="导出界面"
       open={open}
       onCancel={onClose}
       onOk={handleOk}
@@ -81,7 +81,7 @@ export function UIExportModal({ open, onClose }: UIExportModalProps) {
       width={480}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-        当前共 {pageCount} 个画布、{elementCount} 个元素。将导出全部页面为 ZIP 包。
+        仅导出 UI 编排内容（不含 3D 场景）。当前共 {pageCount} 个画布、{elementCount} 个元素。
       </Typography.Paragraph>
 
       <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>

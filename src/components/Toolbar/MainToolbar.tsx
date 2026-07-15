@@ -94,7 +94,7 @@ export function Toolbar() {
       notify.success(`可部署项目包已导出${detail ? `（${detail}）` : ''}`);
     } catch (error) {
       console.error(error);
-      notify.error(error instanceof Error ? error.message : '项目包导出失败');
+      notify.error(error instanceof Error ? error.message : '部署包导出失败');
     } finally {
       setSavingProject(false);
     }
@@ -323,7 +323,7 @@ export function Toolbar() {
                   <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
                   <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                 </svg>
-                <span>导出项目</span>
+                <span>导出界面</span>
               </button>
             </>
           ) : editorMode === 'preview' ? (
@@ -338,7 +338,7 @@ export function Toolbar() {
                 <path d="M8 10V2M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              <span>{savingProject ? '导出中…' : '导出项目'}</span>
+              <span>{savingProject ? '导出中…' : '导出部署包'}</span>
             </button>
           ) : (
             <>
@@ -398,7 +398,7 @@ export function Toolbar() {
                   <path d="M8 10V2M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   <path d="M2 10V13C2 13.5523 2.44772 14 3 14H13C13.5523 14 14 13.5523 14 13V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                <span>导出</span>
+                <span>导出场景</span>
               </button>
             </>
           )}
