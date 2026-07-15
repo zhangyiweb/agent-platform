@@ -492,27 +492,39 @@
 
 .ui-canvas-scroll {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   position: relative;
+  cursor: grab;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.04), transparent 55%),
+    #141418;
+  user-select: none;
+}
+
+.ui-canvas-scroll.is-panning {
+  cursor: grabbing;
 }
 
 .ui-canvas-scroll-content {
-  display: inline-block;
-  min-width: 100%;
-  min-height: 100%;
-  padding: 40px;
-  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
 .ui-canvas-stage {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
   flex-shrink: 0;
-  transition: background 0.2s;
+  will-change: transform;
+  transform-origin: 0 0;
 }
 
 .ui-canvas-stage.drag-over {
-  background: rgba(59, 130, 246, 0.05);
+  outline: 2px dashed rgba(59, 130, 246, 0.45);
+  outline-offset: 4px;
 }
 
 .ui-canvas-frame {

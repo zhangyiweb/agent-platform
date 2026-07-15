@@ -5,6 +5,7 @@ import {
   getTopmostSelectedIds,
   useUIEditorStore,
 } from '@/store/uiEditorStore';
+import { useEditorStore } from '@/store/editorStore';
 import type { UIElement, UIElementType } from '@/types/uiEditor';
 import {
   computeSnap,
@@ -54,6 +55,7 @@ export function UICanvas() {
     switchPage,
     removePage,
   } = useUIEditorStore();
+  const editorMode = useEditorStore((s) => s.editorMode);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -75,6 +77,17 @@ export function UICanvas() {
     currentX: number;
     currentY: number;
   } | null>(null);
+  const panRef = useRef({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const viewFlushRaf = useRef(0);
+  const panDragRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    origPanX: number;
+    origPanY: number;
+    moved: boolean;
+  } | null>(null);
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -85,8 +98,103 @@ export function UICanvas() {
     w: number;
     h: number;
   } | null>(null);
+  /** 本地视口状态：缩放与平移同帧更新，避免抖动 */
+  const [view, setView] = useState({ zoom, panX: 0, panY: 0 });
+  const [isPanning, setIsPanning] = useState(false);
 
   const rootElements = getChildren(null);
+
+  const applyView = useCallback(
+    (nextZoom: number, nextPan: { x: number; y: number }, commit = true) => {
+      const z = Math.min(3, Math.max(0.1, nextZoom));
+      const p = {
+        x: Math.round(nextPan.x),
+        y: Math.round(nextPan.y),
+      };
+      zoomRef.current = z;
+      panRef.current = p;
+      if (stageRef.current) {
+        stageRef.current.style.transform = `translate(${p.x}px, ${p.y}px) scale(${z})`;
+      }
+
+      const flush = () => {
+        setView({ zoom: zoomRef.current, panX: panRef.current.x, panY: panRef.current.y });
+        if (Math.abs(useUIEditorStore.getState().zoom - zoomRef.current) > 1e-4) {
+          setZoom(zoomRef.current);
+        }
+      };
+
+      if (!commit) {
+        // 滚轮/拖拽：先改 DOM，每帧最多同步一次 React，避免卡顿抖动
+        if (!viewFlushRaf.current) {
+          viewFlushRaf.current = requestAnimationFrame(() => {
+            viewFlushRaf.current = 0;
+            flush();
+          });
+        }
+        return;
+      }
+
+      if (viewFlushRaf.current) {
+        cancelAnimationFrame(viewFlushRaf.current);
+        viewFlushRaf.current = 0;
+      }
+      flush();
+    },
+    [setZoom]
+  );
+
+  /** 以视口中心为基准缩放，缩放与平移一次算完 */
+  const setZoomAtViewportCenter = useCallback(
+    (nextZoom: number) => {
+      const world = scrollRef.current;
+      const oldZoom = zoomRef.current;
+      const clamped = Math.min(3, Math.max(0.1, nextZoom));
+      if (Math.abs(clamped - oldZoom) < 1e-4) return;
+      if (!world) {
+        applyView(clamped, panRef.current);
+        return;
+      }
+
+      const rect = world.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const canvasX = (cx - panRef.current.x) / oldZoom;
+      const canvasY = (cy - panRef.current.y) / oldZoom;
+      applyView(clamped, {
+        x: cx - canvasX * clamped,
+        y: cy - canvasY * clamped,
+      });
+    },
+    [applyView]
+  );
+
+  /** 画布居中并适应视口 */
+  const centerCanvasInViewport = useCallback(
+    (nextZoom?: number) => {
+      const world = scrollRef.current;
+      if (!world) return;
+      // 面板隐藏时宽高为 0，此时适应会算成 10%，必须跳过
+      if (world.clientWidth < 40 || world.clientHeight < 40) return;
+      const z =
+        nextZoom ??
+        Math.max(
+          0.1,
+          Math.min(
+            3,
+            Math.min(
+              (world.clientWidth - 80) / canvasWidth,
+              (world.clientHeight - 80) / canvasHeight
+            )
+          )
+        );
+      applyView(z, {
+        x: (world.clientWidth - canvasWidth * z) / 2,
+        y: (world.clientHeight - canvasHeight * z) / 2,
+      });
+    },
+    [canvasWidth, canvasHeight, applyView]
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -120,123 +228,208 @@ export function UICanvas() {
   }, [selectedId, selectedIds, deleteElement, copySelectedElements, pasteClipboardElements]);
 
   useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
+    const world = scrollRef.current;
+    if (!world) return;
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.05 : 0.05;
-      const currentZoom = useUIEditorStore.getState().zoom;
-      setZoom(currentZoom + delta);
+      const oldZoom = zoomRef.current;
+      // 指数缩放更顺滑；限制单次步进，避免跳变
+      const factor = Math.exp(-e.deltaY * 0.0012);
+      const clamped = Math.min(3, Math.max(0.1, oldZoom * factor));
+      if (Math.abs(clamped - oldZoom) < 1e-4) return;
+
+      const rect = world.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const canvasX = (cx - panRef.current.x) / oldZoom;
+      const canvasY = (cy - panRef.current.y) / oldZoom;
+      applyView(clamped, {
+        x: cx - canvasX * clamped,
+        y: cy - canvasY * clamped,
+      }, false);
     };
 
-    viewport.addEventListener('wheel', onWheel, { passive: false });
-    return () => viewport.removeEventListener('wheel', onWheel);
-  }, [setZoom]);
+    world.addEventListener('wheel', onWheel, { passive: false });
+    return () => world.removeEventListener('wheel', onWheel);
+  }, [applyView]);
+
+  // 进入 UI 编排 / 切页 / 改画布尺寸后：布局完成再适应屏幕并居中
+  useEffect(() => {
+    if (editorMode !== 'ui') return;
+    const world = scrollRef.current;
+    if (!world) return;
+
+    let cancelled = false;
+    let fitted = false;
+
+    const tryFit = () => {
+      if (cancelled || fitted) return;
+      if (world.clientWidth < 40 || world.clientHeight < 40) return;
+      centerCanvasInViewport();
+      fitted = true;
+    };
+
+    // 隐藏 → 显示后需等浏览器完成 reflow
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(tryFit);
+    });
+    const timer = window.setTimeout(tryFit, 80);
+
+    // 若首帧仍无尺寸，等容器真正显示后再适应一次
+    const ro = new ResizeObserver(() => {
+      tryFit();
+      if (fitted) ro.disconnect();
+    });
+    ro.observe(world);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf1);
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [editorMode, activePageId, canvasWidth, canvasHeight, centerCanvasInViewport]);
 
   const getCanvasPoint = useCallback(
     (clientX: number, clientY: number) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return { x: 0, y: 0 };
-
-      const rect = canvas.getBoundingClientRect();
+      const world = scrollRef.current;
+      if (!world) return { x: 0, y: 0 };
+      const rect = world.getBoundingClientRect();
+      const currentPan = panRef.current;
+      const currentZoom = zoomRef.current;
       return {
-        x: (clientX - rect.left) / zoom,
-        y: (clientY - rect.top) / zoom,
+        x: (clientX - rect.left - currentPan.x) / currentZoom,
+        y: (clientY - rect.top - currentPan.y) / currentZoom,
       };
     },
-    [zoom]
+    []
   );
 
   const handleFitZoom = useCallback(() => {
-    const scroll = scrollRef.current;
-    if (!scroll) return;
-    const padding = 80;
-    const availW = scroll.clientWidth - padding;
-    const availH = scroll.clientHeight - padding;
-    const scale = Math.min(availW / canvasWidth, availH / canvasHeight);
-    setZoom(Math.max(0.1, Math.min(3, scale)));
-  }, [canvasWidth, canvasHeight, setZoom]);
+    centerCanvasInViewport();
+  }, [centerCanvasInViewport]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) return;
+    if (panDragRef.current?.moved) return;
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('ui-canvas-inner')) {
       selectElement(null);
     }
   };
 
-  const handleMarqueeMouseDown = (e: React.MouseEvent) => {
-    if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+  const handleWorldMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
     const target = e.target as HTMLElement;
-    if (target.closest('.ui-element')) return;
-    if (
-      target !== e.currentTarget &&
-      !target.classList.contains('ui-canvas-inner') &&
-      !target.classList.contains('ui-canvas-grid')
-    ) {
+
+    // Ctrl + 左键：框选
+    if (e.ctrlKey || e.metaKey) {
+      if (target.closest('.ui-element')) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const start = getCanvasPoint(e.clientX, e.clientY);
+      marqueeRef.current = {
+        startX: start.x,
+        startY: start.y,
+        currentX: start.x,
+        currentY: start.y,
+      };
+      setMarqueeBox({ x: start.x, y: start.y, w: 0, h: 0 });
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!marqueeRef.current) return;
+        const point = getCanvasPoint(ev.clientX, ev.clientY);
+        marqueeRef.current.currentX = point.x;
+        marqueeRef.current.currentY = point.y;
+        const x = Math.min(marqueeRef.current.startX, point.x);
+        const y = Math.min(marqueeRef.current.startY, point.y);
+        const w = Math.abs(point.x - marqueeRef.current.startX);
+        const h = Math.abs(point.y - marqueeRef.current.startY);
+        setMarqueeBox({ x, y, w, h });
+      };
+
+      const onMouseUp = () => {
+        const box = marqueeRef.current;
+        marqueeRef.current = null;
+        setMarqueeBox(null);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+
+        if (!box) return;
+        const x = Math.min(box.startX, box.currentX);
+        const y = Math.min(box.startY, box.currentY);
+        const w = Math.abs(box.currentX - box.startX);
+        const h = Math.abs(box.currentY - box.startY);
+
+        if (w < 2 && h < 2) {
+          selectElement(null);
+          return;
+        }
+
+        const selectionRect = { x, y, w, h };
+        const { elements: els } = useUIEditorStore.getState();
+        const hitIds = els
+          .filter((el) => el.visible !== false)
+          .filter((el) => {
+            const abs = getAbsolutePosition(el, els);
+            return rectsIntersect(selectionRect, {
+              x: abs.x,
+              y: abs.y,
+              w: el.width,
+              h: el.height,
+            });
+          })
+          .map((el) => el.id);
+
+        setSelectedIds(getDeepestSelectedIds(hitIds, els));
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
       return;
     }
 
-    e.preventDefault();
-    e.stopPropagation();
+    // 左键拖空白区域：平移画布（元素本身会 stopPropagation）
+    if (target.closest('.ui-element')) return;
 
-    const start = getCanvasPoint(e.clientX, e.clientY);
-    marqueeRef.current = {
-      startX: start.x,
-      startY: start.y,
-      currentX: start.x,
-      currentY: start.y,
+    e.preventDefault();
+    panDragRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      origPanX: panRef.current.x,
+      origPanY: panRef.current.y,
+      moved: false,
     };
-    setMarqueeBox({ x: start.x, y: start.y, w: 0, h: 0 });
+    setIsPanning(true);
 
     const onMouseMove = (ev: MouseEvent) => {
-      if (!marqueeRef.current) return;
-      const point = getCanvasPoint(ev.clientX, ev.clientY);
-      marqueeRef.current.currentX = point.x;
-      marqueeRef.current.currentY = point.y;
-      const x = Math.min(marqueeRef.current.startX, point.x);
-      const y = Math.min(marqueeRef.current.startY, point.y);
-      const w = Math.abs(point.x - marqueeRef.current.startX);
-      const h = Math.abs(point.y - marqueeRef.current.startY);
-      setMarqueeBox({ x, y, w, h });
+      const drag = panDragRef.current;
+      if (!drag) return;
+      const dx = ev.clientX - drag.startClientX;
+      const dy = ev.clientY - drag.startClientY;
+      if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+      drag.moved = true;
+      applyView(zoomRef.current, {
+        x: drag.origPanX + dx,
+        y: drag.origPanY + dy,
+      }, false);
     };
 
     const onMouseUp = () => {
-      const box = marqueeRef.current;
-      marqueeRef.current = null;
-      setMarqueeBox(null);
+      const drag = panDragRef.current;
+      // 保留 moved 标记给随后 click 判断；下一帧清掉
+      window.setTimeout(() => {
+        panDragRef.current = null;
+      }, 0);
+      setIsPanning(false);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
-
-      if (!box) return;
-      const x = Math.min(box.startX, box.currentX);
-      const y = Math.min(box.startY, box.currentY);
-      const w = Math.abs(box.currentX - box.startX);
-      const h = Math.abs(box.currentY - box.startY);
-
-      // 点击无拖动：清空选择
-      if (w < 2 && h < 2) {
+      if (drag && !drag.moved) {
+        // 纯点击空白：取消选中
         selectElement(null);
-        return;
       }
-
-      const selectionRect = { x, y, w, h };
-      const { elements: els } = useUIEditorStore.getState();
-      const hitIds = els
-        .filter((el) => el.visible !== false)
-        .filter((el) => {
-          const abs = getAbsolutePosition(el, els);
-          return rectsIntersect(selectionRect, {
-            x: abs.x,
-            y: abs.y,
-            w: el.width,
-            h: el.height,
-          });
-        })
-        .map((el) => el.id);
-
-      // 去掉被框住的祖先，保留最深层多个目标，确保都能显示选中态
-      setSelectedIds(getDeepestSelectedIds(hitIds, els));
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -341,8 +534,8 @@ export function UICanvas() {
       const state = dragState.current;
       if (!state || state.type !== 'move') return;
 
-      const dx = (ev.clientX - state.startX) / zoom;
-      const dy = (ev.clientY - state.startY) / zoom;
+      const dx = (ev.clientX - state.startX) / zoomRef.current;
+      const dy = (ev.clientY - state.startY) / zoomRef.current;
       if (!moved && Math.hypot(dx, dy) < 3) return;
       moved = true;
 
@@ -432,8 +625,8 @@ export function UICanvas() {
       const state = dragState.current;
       if (!state || state.type !== 'resize' || !state.handle) return;
 
-      const dx = (ev.clientX - state.startX) / zoom;
-      const dy = (ev.clientY - state.startY) / zoom;
+      const dx = (ev.clientX - state.startX) / zoomRef.current;
+      const dy = (ev.clientY - state.startY) / zoomRef.current;
       const { handle: h } = state;
 
       let newX = state.origX;
@@ -486,7 +679,7 @@ export function UICanvas() {
         selected={isSelected}
         primarySelected={selectedId === element.id}
         selectedId={selectedId}
-        scale={zoom}
+        scale={view.zoom}
         onSelect={selectElement}
         onMoveStart={handleMoveStart}
         onResizeStart={handleResizeStart}
@@ -552,11 +745,21 @@ export function UICanvas() {
           </span>
         </div>
         <div className="ui-canvas-zoom">
-          <button type="button" className="ui-zoom-btn" onClick={() => setZoom(zoom - 0.1)} title="缩小">
+          <button
+            type="button"
+            className="ui-zoom-btn"
+            onClick={() => setZoomAtViewportCenter(view.zoom - 0.1)}
+            title="缩小"
+          >
             −
           </button>
-          <span className="ui-zoom-label">{Math.round(zoom * 100)}%</span>
-          <button type="button" className="ui-zoom-btn" onClick={() => setZoom(zoom + 0.1)} title="放大">
+          <span className="ui-zoom-label">{Math.round(view.zoom * 100)}%</span>
+          <button
+            type="button"
+            className="ui-zoom-btn"
+            onClick={() => setZoomAtViewportCenter(view.zoom + 0.1)}
+            title="放大"
+          >
             +
           </button>
           <button type="button" className="ui-zoom-fit-btn" onClick={handleFitZoom} title="适应窗口">
@@ -565,16 +768,21 @@ export function UICanvas() {
         </div>
       </div>
 
-      <div className="ui-canvas-scroll" ref={scrollRef}>
+      <div
+        className={`ui-canvas-scroll ${isPanning ? 'is-panning' : ''}`}
+        ref={scrollRef}
+        onMouseDown={handleWorldMouseDown}
+      >
         <div className="ui-canvas-scroll-content">
           <div
+            ref={stageRef}
             className={`ui-canvas-stage ${isDragOver ? 'drag-over' : ''}`}
             style={{
-              width: canvasWidth * zoom,
-              height: canvasHeight * zoom,
+              width: canvasWidth,
+              height: canvasHeight,
+              transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
             }}
             onClick={handleCanvasClick}
-            onMouseDown={handleMarqueeMouseDown}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={() => {
@@ -583,7 +791,6 @@ export function UICanvas() {
             }}
           >
             <div className="ui-canvas-frame">
-              <div className="ui-canvas-frame-label">{canvasWidth} × {canvasHeight}</div>
               <div
                 ref={canvasRef}
                 className="ui-canvas-inner"
@@ -591,8 +798,6 @@ export function UICanvas() {
                   width: canvasWidth,
                   height: canvasHeight,
                   backgroundColor: canvasBackground,
-                  transform: `scale(${zoom})`,
-                  transformOrigin: 'top left',
                 }}
               >
                 {showGrid && <div className="ui-canvas-grid" aria-hidden />}
