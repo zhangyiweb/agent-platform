@@ -69,6 +69,33 @@ function cloneElements(elements: UIElement[]): UIElement[] {
   }));
 }
 
+/** 去掉子孙，只保留多选中的最顶层节点（一起拖动时用） */
+export function getTopmostSelectedIds(selectedIds: string[], elements: UIElement[]): string[] {
+  return selectedIds.filter((id) => {
+    const el = elements.find((e) => e.id === id);
+    if (!el) return false;
+    let pid = el.parentId;
+    while (pid) {
+      if (selectedIds.includes(pid)) return false;
+      pid = elements.find((e) => e.id === pid)?.parentId ?? null;
+    }
+    return true;
+  });
+}
+
+/** 去掉祖先，只保留框选命中中的最深层节点（框选高亮用） */
+export function getDeepestSelectedIds(selectedIds: string[], elements: UIElement[]): string[] {
+  return selectedIds.filter((id) => {
+    if (!elements.some((e) => e.id === id)) return false;
+    return !selectedIds.some(
+      (other) => other !== id && isDescendantOf(id, other, elements)
+    );
+  });
+}
+
+/** 内存剪贴板：完整元素树副本（含子孙） */
+let uiElementClipboard: UIElement[] = [];
+
 function pageFromActive(state: {
   activePageId: string;
   pages: UIPage[];
@@ -109,6 +136,7 @@ function flushAndOptionalSwitch(
     canvasHeight: next.canvasHeight,
     canvasBackground: next.canvasBackground,
     selectedId: null,
+    selectedIds: [],
   };
 }
 
@@ -117,6 +145,8 @@ interface UIEditorState {
   activePageId: string;
   elements: UIElement[];
   selectedId: string | null;
+  /** 多选（框选）；与 selectedId 同步，selectedId 为最后选中项供属性面板使用 */
+  selectedIds: string[];
   canvasWidth: number;
   canvasHeight: number;
   canvasBackground: string;
@@ -132,7 +162,14 @@ interface UIEditorActions {
   deleteElement: (id: string) => void;
   duplicateElement: (id: string) => string | null;
   selectElement: (id: string | null) => void;
+  setSelectedIds: (ids: string[]) => void;
+  /** 复制当前选中元素树到剪贴板 */
+  copySelectedElements: () => boolean;
+  /** 粘贴剪贴板元素 */
+  pasteClipboardElements: () => string[];
   moveElement: (id: string, x: number, y: number) => void;
+  /** 批量移动（多选一起拖动） */
+  moveElements: (updates: Array<{ id: string; x: number; y: number }>) => void;
   resizeElement: (id: string, width: number, height: number, x?: number, y?: number) => void;
   reparentElement: (id: string, newParentId: string | null) => void;
   bringForward: (id: string) => void;
@@ -178,6 +215,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
   activePageId: initialPage.id,
   elements: [],
   selectedId: null,
+  selectedIds: [],
   canvasWidth: initialPage.canvasWidth,
   canvasHeight: initialPage.canvasHeight,
   canvasBackground: initialPage.canvasBackground,
@@ -192,17 +230,41 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
 
   findContainerAtPoint: (x, y, excludeId) => {
     const { elements } = get();
-    const candidates = elements
-      .filter((el) => canHaveChildren(el.type) && el.visible && el.id !== excludeId)
-      .sort((a, b) => b.zIndex - a.zIndex);
-
-    for (const el of candidates) {
-      const abs = getAbsolutePosition(el, elements);
-      if (x >= abs.x && x <= abs.x + el.width && y >= abs.y && y <= abs.y + el.height) {
-        return el;
-      }
+    const excludeSet = new Set<string>();
+    if (excludeId) {
+      excludeSet.add(excludeId);
+      collectDescendantIds(excludeId, elements).forEach((id) => excludeSet.add(id));
     }
-    return null;
+
+    const getDepth = (el: UIElement): number => {
+      let depth = 0;
+      let pid = el.parentId;
+      while (pid) {
+        depth += 1;
+        pid = elements.find((e) => e.id === pid)?.parentId ?? null;
+      }
+      return depth;
+    };
+
+    const hits = elements
+      .filter(
+        (el) =>
+          canHaveChildren(el.type) &&
+          el.visible !== false &&
+          !excludeSet.has(el.id)
+      )
+      .filter((el) => {
+        const abs = getAbsolutePosition(el, elements);
+        return x >= abs.x && x <= abs.x + el.width && y >= abs.y && y <= abs.y + el.height;
+      })
+      // 优先最深嵌套；同层再比 zIndex
+      .sort((a, b) => {
+        const depthDiff = getDepth(b) - getDepth(a);
+        if (depthDiff !== 0) return depthDiff;
+        return b.zIndex - a.zIndex;
+      });
+
+    return hits[0] ?? null;
   },
 
   addElement: (type, x, y, parentId = null) => {
@@ -247,6 +309,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
       return {
         elements: nextElements,
         selectedId: element.id,
+        selectedIds: [element.id],
         pages: state.pages.map((p) =>
           p.id === state.activePageId ? { ...p, elements: nextElements } : p
         ),
@@ -300,9 +363,11 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
     set((state) => {
       const toDelete = new Set([id, ...collectDescendantIds(id, state.elements)]);
       const nextElements = state.elements.filter((el) => !toDelete.has(el.id));
+      const nextSelectedIds = state.selectedIds.filter((sid) => !toDelete.has(sid));
       return {
         elements: nextElements,
-        selectedId: state.selectedId && toDelete.has(state.selectedId) ? null : state.selectedId,
+        selectedIds: nextSelectedIds,
+        selectedId: nextSelectedIds[nextSelectedIds.length - 1] ?? null,
         pages: state.pages.map((p) =>
           p.id === state.activePageId ? { ...p, elements: nextElements } : p
         ),
@@ -360,6 +425,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
       return {
         elements: nextElements,
         selectedId: rootCopy.id,
+        selectedIds: [rootCopy.id],
         pages: state.pages.map((p) =>
           p.id === state.activePageId ? { ...p, elements: nextElements } : p
         ),
@@ -369,11 +435,119 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
     return rootCopy.id;
   },
 
-  selectElement: (id) => set({ selectedId: id }),
+  selectElement: (id) =>
+    set({
+      selectedId: id,
+      selectedIds: id ? [id] : [],
+    }),
+
+  setSelectedIds: (ids) => {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    set({
+      selectedIds: unique,
+      selectedId: unique[unique.length - 1] ?? null,
+    });
+  },
+
+  copySelectedElements: () => {
+    const { elements, selectedIds, selectedId } = get();
+    const ids =
+      selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : [];
+    const roots = getTopmostSelectedIds(ids, elements);
+    if (roots.length === 0) return false;
+
+    const collected: UIElement[] = [];
+    const seen = new Set<string>();
+    roots.forEach((rootId) => {
+      const treeIds = [rootId, ...collectDescendantIds(rootId, elements)];
+      treeIds.forEach((tid) => {
+        if (seen.has(tid)) return;
+        seen.add(tid);
+        const el = elements.find((e) => e.id === tid);
+        if (el) collected.push(cloneElements([el])[0]);
+      });
+    });
+
+    uiElementClipboard = collected;
+    return collected.length > 0;
+  },
+
+  pasteClipboardElements: () => {
+    if (uiElementClipboard.length === 0) return [];
+
+    const { elements } = get();
+    const idMap = new Map<string, string>();
+    uiElementClipboard.forEach((el) => idMap.set(el.id, generateId()));
+
+    const clipboardIds = new Set(uiElementClipboard.map((el) => el.id));
+    const maxZ = elements.reduce((max, el) => Math.max(max, el.zIndex), 0);
+    let zOffset = 0;
+
+    const newElements: UIElement[] = uiElementClipboard.map((el) => {
+      const isRootInClipboard =
+        !el.parentId || !clipboardIds.has(el.parentId);
+      const newParentId = isRootInClipboard
+        ? el.parentId && elements.some((e) => e.id === el.parentId)
+          ? el.parentId
+          : null
+        : idMap.get(el.parentId!) ?? null;
+
+      const copy = cloneElements([el])[0];
+      copy.id = idMap.get(el.id)!;
+      copy.parentId = newParentId;
+      copy.domId = undefined;
+      copy.zIndex = maxZ + 1 + zOffset;
+      zOffset += 1;
+      if (isRootInClipboard) {
+        copy.name = `${el.name} 副本`;
+        copy.x = el.x + 20;
+        copy.y = el.y + 20;
+      }
+      return copy;
+    });
+
+    const pastedRootIds = newElements
+      .filter((el) => {
+        const src = uiElementClipboard.find((c) => idMap.get(c.id) === el.id);
+        return src && (!src.parentId || !clipboardIds.has(src.parentId));
+      })
+      .map((el) => el.id);
+
+    set((state) => {
+      const nextElements = [...state.elements, ...newElements];
+      return {
+        elements: nextElements,
+        selectedIds: pastedRootIds,
+        selectedId: pastedRootIds[pastedRootIds.length - 1] ?? null,
+        pages: state.pages.map((p) =>
+          p.id === state.activePageId ? { ...p, elements: nextElements } : p
+        ),
+      };
+    });
+
+    return pastedRootIds;
+  },
 
   moveElement: (id, x, y) => {
     set((state) => {
       const nextElements = state.elements.map((el) => (el.id === id ? { ...el, x, y } : el));
+      return {
+        elements: nextElements,
+        pages: state.pages.map((p) =>
+          p.id === state.activePageId ? { ...p, elements: nextElements } : p
+        ),
+      };
+    });
+  },
+
+  moveElements: (updates) => {
+    if (updates.length === 0) return;
+    const map = new Map(updates.map((u) => [u.id, u]));
+    set((state) => {
+      const nextElements = state.elements.map((el) => {
+        const u = map.get(el.id);
+        return u ? { ...el, x: u.x, y: u.y } : el;
+      });
       return {
         elements: nextElements,
         pages: state.pages.map((p) =>
@@ -552,6 +726,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
     set((state) => ({
       elements: [],
       selectedId: null,
+      selectedIds: [],
       pages: state.pages.map((p) =>
         p.id === state.activePageId ? { ...p, elements: [] } : p
       ),
@@ -572,6 +747,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
         canvasHeight: page.canvasHeight,
         canvasBackground: page.canvasBackground,
         selectedId: null,
+        selectedIds: [],
       };
     });
     return page.id;
@@ -610,6 +786,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
         canvasHeight: switching ? nextActive.canvasHeight : state.canvasHeight,
         canvasBackground: switching ? nextActive.canvasBackground : state.canvasBackground,
         selectedId: switching ? null : state.selectedId,
+        selectedIds: switching ? [] : state.selectedIds,
       };
     });
   },
@@ -638,6 +815,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
       canvasHeight: copy.canvasHeight,
       canvasBackground: copy.canvasBackground,
       selectedId: null,
+      selectedIds: [],
     });
 
     return copy.id;
@@ -694,6 +872,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
       canvasHeight: active.canvasHeight,
       canvasBackground: active.canvasBackground,
       selectedId: null,
+      selectedIds: [],
     });
   },
 

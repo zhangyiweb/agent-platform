@@ -9,6 +9,8 @@ interface UIElementViewProps {
   element: UIElement;
   children: UIElement[];
   selected: boolean;
+  /** 主选中：仅此项显示缩放手柄 */
+  primarySelected?: boolean;
   selectedId: string | null;
   scale: number;
   onSelect: (id: string) => void;
@@ -16,6 +18,10 @@ interface UIElementViewProps {
   onResizeStart: (id: string, handle: ResizeHandle, e: React.MouseEvent) => void;
   renderChild: (child: UIElement) => React.ReactNode;
   isDropTarget?: boolean;
+  /** 已多选时拖动不折叠选中集 */
+  keepMultiSelectOnDrag?: boolean;
+  /** 多选模式：无缩放锚点，使用更醒目的选中样式 */
+  multiSelect?: boolean;
 }
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -125,12 +131,15 @@ export function UIElementView({
   element,
   children,
   selected,
+  primarySelected = false,
   scale,
   onSelect,
   onMoveStart,
   onResizeStart,
   renderChild,
   isDropTarget,
+  keepMultiSelectOnDrag = false,
+  multiSelect = false,
 }: UIElementViewProps) {
   if (!element.visible) return null;
 
@@ -142,9 +151,17 @@ export function UIElementView({
   const customClass = element.className?.trim() || '';
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Ctrl 用于画布框选，元素上按住 Ctrl 时不启动拖动
+    if (e.ctrlKey || e.metaKey) {
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     if (element.locked) return;
-    onSelect(element.id);
+    // 已在多选内：不折叠，交给 moveStart 整体拖动
+    if (!(keepMultiSelectOnDrag && selected)) {
+      onSelect(element.id);
+    }
     onMoveStart(element.id, e);
   };
 
@@ -224,7 +241,7 @@ export function UIElementView({
       ) : null}
       <div
         id={domId}
-        className={`ui-element ${editorClass} ${customClass} ${element.type === 'container' ? 'ui-element--area' : ''} ${selected ? 'selected' : ''} ${element.locked ? 'locked' : ''} ${isDropTarget ? 'drop-target' : ''}`}
+        className={`ui-element ${editorClass} ${customClass} ${element.type === 'container' ? 'ui-element--area' : ''} ${selected ? 'selected' : ''} ${multiSelect && selected ? 'multi-selected' : ''} ${element.locked ? 'locked' : ''} ${isDropTarget ? 'drop-target' : ''}`}
         style={baseStyle}
         onMouseDown={handleMouseDown}
       >
@@ -233,18 +250,26 @@ export function UIElementView({
 
         {selected && !element.locked && (
           <>
-            <div className="ui-element-selection-border" />
-            {HANDLES.map((handle) => (
-              <div
-                key={handle}
-                className={`ui-resize-handle ui-resize-${handle}`}
-                style={{ transform: `scale(${1 / scale})` }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  onResizeStart(element.id, handle, e);
-                }}
-              />
-            ))}
+            <div
+              className={
+                multiSelect
+                  ? 'ui-element-multi-mask'
+                  : 'ui-element-selection-border'
+              }
+            />
+            {!multiSelect &&
+              primarySelected &&
+              HANDLES.map((handle) => (
+                <div
+                  key={handle}
+                  className={`ui-resize-handle ui-resize-${handle}`}
+                  style={{ transform: `scale(${1 / scale})` }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onResizeStart(element.id, handle, e);
+                  }}
+                />
+              ))}
           </>
         )}
       </div>

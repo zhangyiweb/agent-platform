@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useUIEditorStore } from '@/store/uiEditorStore';
+import {
+  getAbsolutePosition,
+  getDeepestSelectedIds,
+  getTopmostSelectedIds,
+  useUIEditorStore,
+} from '@/store/uiEditorStore';
 import type { UIElement, UIElementType } from '@/types/uiEditor';
 import {
   computeSnap,
@@ -13,10 +18,18 @@ const LAYER_DRAG_TYPE = 'application/ui-layer';
 
 export { DRAG_TYPE, LAYER_DRAG_TYPE };
 
+function rectsIntersect(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 export function UICanvas() {
   const {
     elements,
     selectedId,
+    selectedIds,
     canvasWidth,
     canvasHeight,
     canvasBackground,
@@ -26,7 +39,10 @@ export function UICanvas() {
     activePageId,
     addElement,
     selectElement,
-    moveElement,
+    setSelectedIds,
+    copySelectedElements,
+    pasteClipboardElements,
+    moveElements,
     resizeElement,
     reparentElement,
     updateElement,
@@ -53,28 +69,55 @@ export function UICanvas() {
     origW: number;
     origH: number;
   } | null>(null);
+  const marqueeRef = useRef<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [marqueeBox, setMarqueeBox] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
 
   const rootElements = getChildren(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-          return;
-        }
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'c' || e.key === 'C')) {
         e.preventDefault();
-        deleteElement(selectedId);
+        copySelectedElements();
+        return;
+      }
+      if (mod && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        pasteClipboardElements();
+        return;
+      }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedIds.length > 0 || selectedId)) {
+        e.preventDefault();
+        const ids =
+          selectedIds.length > 0 ? [...selectedIds] : selectedId ? [selectedId] : [];
+        ids.forEach((id) => deleteElement(id));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, deleteElement]);
+  }, [selectedId, selectedIds, deleteElement, copySelectedElements, pasteClipboardElements]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -116,9 +159,88 @@ export function UICanvas() {
   }, [canvasWidth, canvasHeight, setZoom]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) return;
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('ui-canvas-inner')) {
       selectElement(null);
     }
+  };
+
+  const handleMarqueeMouseDown = (e: React.MouseEvent) => {
+    if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.ui-element')) return;
+    if (
+      target !== e.currentTarget &&
+      !target.classList.contains('ui-canvas-inner') &&
+      !target.classList.contains('ui-canvas-grid')
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const start = getCanvasPoint(e.clientX, e.clientY);
+    marqueeRef.current = {
+      startX: start.x,
+      startY: start.y,
+      currentX: start.x,
+      currentY: start.y,
+    };
+    setMarqueeBox({ x: start.x, y: start.y, w: 0, h: 0 });
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!marqueeRef.current) return;
+      const point = getCanvasPoint(ev.clientX, ev.clientY);
+      marqueeRef.current.currentX = point.x;
+      marqueeRef.current.currentY = point.y;
+      const x = Math.min(marqueeRef.current.startX, point.x);
+      const y = Math.min(marqueeRef.current.startY, point.y);
+      const w = Math.abs(point.x - marqueeRef.current.startX);
+      const h = Math.abs(point.y - marqueeRef.current.startY);
+      setMarqueeBox({ x, y, w, h });
+    };
+
+    const onMouseUp = () => {
+      const box = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarqueeBox(null);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      if (!box) return;
+      const x = Math.min(box.startX, box.currentX);
+      const y = Math.min(box.startY, box.currentY);
+      const w = Math.abs(box.currentX - box.startX);
+      const h = Math.abs(box.currentY - box.startY);
+
+      // 点击无拖动：清空选择
+      if (w < 2 && h < 2) {
+        selectElement(null);
+        return;
+      }
+
+      const selectionRect = { x, y, w, h };
+      const { elements: els } = useUIEditorStore.getState();
+      const hitIds = els
+        .filter((el) => el.visible !== false)
+        .filter((el) => {
+          const abs = getAbsolutePosition(el, els);
+          return rectsIntersect(selectionRect, {
+            x: abs.x,
+            y: abs.y,
+            w: el.width,
+            h: el.height,
+          });
+        })
+        .map((el) => el.id);
+
+      // 去掉被框住的祖先，保留最深层多个目标，确保都能显示选中态
+      setSelectedIds(getDeepestSelectedIds(hitIds, els));
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -176,8 +298,31 @@ export function UICanvas() {
   };
 
   const handleMoveStart = (id: string, e: React.MouseEvent) => {
-    const el = elements.find((item) => item.id === id);
+    const store = useUIEditorStore.getState();
+    const el = store.elements.find((item) => item.id === id);
     if (!el || el.locked) return;
+
+    // 已在多选中：保持多选；否则单选该元素
+    let ids = store.selectedIds.includes(id)
+      ? [...store.selectedIds]
+      : [id];
+    if (!store.selectedIds.includes(id)) {
+      selectElement(id);
+      ids = [id];
+    }
+
+    // 顶层一起拖，避免父子同时位移叠加速度
+    const moveIds = getTopmostSelectedIds(ids, store.elements).filter((mid) => {
+      const item = store.elements.find((x) => x.id === mid);
+      return item && !item.locked;
+    });
+    if (moveIds.length === 0) return;
+
+    const origins = new Map<string, { x: number; y: number }>();
+    moveIds.forEach((mid) => {
+      const item = store.elements.find((x) => x.id === mid)!;
+      origins.set(mid, { x: item.x, y: item.y });
+    });
 
     dragState.current = {
       type: 'move',
@@ -190,20 +335,27 @@ export function UICanvas() {
       origH: el.height,
     };
 
+    let moved = false;
+
     const onMouseMove = (ev: MouseEvent) => {
       const state = dragState.current;
       if (!state || state.type !== 'move') return;
 
       const dx = (ev.clientX - state.startX) / zoom;
       const dy = (ev.clientY - state.startY) / zoom;
-      const proposedX = state.origX + dx;
-      const proposedY = state.origY + dy;
-      const currentElements = useUIEditorStore.getState().elements;
-      const dragged = currentElements.find((item) => item.id === state.id);
-      if (!dragged) return;
+      if (!moved && Math.hypot(dx, dy) < 3) return;
+      moved = true;
 
+      const currentElements = useUIEditorStore.getState().elements;
+      const primary = currentElements.find((item) => item.id === state.id);
+      if (!primary) return;
+
+      // 仅对「拖拽主元素」吸附；其他选中项跟同样的位移
+      const primaryOrig = origins.get(state.id) ?? { x: state.origX, y: state.origY };
+      const proposedX = primaryOrig.x + dx;
+      const proposedY = primaryOrig.y + dy;
       const { width: parentW, height: parentH } = getParentBounds(
-        dragged.parentId,
+        primary.parentId,
         currentElements,
         canvasWidth,
         canvasHeight
@@ -213,20 +365,33 @@ export function UICanvas() {
         state.id,
         proposedX,
         proposedY,
-        dragged.width,
-        dragged.height,
-        dragged.parentId,
+        primary.width,
+        primary.height,
+        primary.parentId,
         parentW,
         parentH
       );
       setSnapGuides(snap.guides);
-      moveElement(state.id, Math.round(snap.x), Math.round(snap.y));
+
+      const snappedDx = snap.x - primaryOrig.x;
+      const snappedDy = snap.y - primaryOrig.y;
+
+      const updates = moveIds.map((mid) => {
+        const orig = origins.get(mid)!;
+        return {
+          id: mid,
+          x: Math.round(orig.x + snappedDx),
+          y: Math.round(orig.y + snappedDy),
+        };
+      });
+      moveElements(updates);
     };
 
     const onMouseUp = (ev: MouseEvent) => {
       setSnapGuides([]);
       const state = dragState.current;
-      if (state && state.type === 'move') {
+      // 多选时不自动改父级，避免把一组拆散；单选才允许落点挂载
+      if (moved && state && state.type === 'move' && moveIds.length === 1) {
         const elNow = useUIEditorStore.getState().elements.find((item) => item.id === state.id);
         if (elNow) {
           const point = getCanvasPoint(ev.clientX, ev.clientY);
@@ -311,12 +476,15 @@ export function UICanvas() {
 
   const renderElement = (element: UIElement): React.ReactNode => {
     const children = getChildren(element.id);
+    const isSelected = selectedIds.includes(element.id) || selectedId === element.id;
+    const isMultiSelect = selectedIds.length > 1;
     return (
       <UIElementView
         key={element.id}
         element={element}
         children={children}
-        selected={selectedId === element.id}
+        selected={isSelected}
+        primarySelected={selectedId === element.id}
         selectedId={selectedId}
         scale={zoom}
         onSelect={selectElement}
@@ -324,6 +492,8 @@ export function UICanvas() {
         onResizeStart={handleResizeStart}
         renderChild={renderElement}
         isDropTarget={dropTargetId === element.id}
+        keepMultiSelectOnDrag
+        multiSelect={isMultiSelect}
       />
     );
   };
@@ -404,6 +574,7 @@ export function UICanvas() {
               height: canvasHeight * zoom,
             }}
             onClick={handleCanvasClick}
+            onMouseDown={handleMarqueeMouseDown}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={() => {
@@ -426,6 +597,17 @@ export function UICanvas() {
               >
                 {showGrid && <div className="ui-canvas-grid" aria-hidden />}
                 {rootElements.map((el) => renderElement(el))}
+                {marqueeBox && (
+                  <div
+                    className="ui-marquee"
+                    style={{
+                      left: marqueeBox.x,
+                      top: marqueeBox.y,
+                      width: marqueeBox.w,
+                      height: marqueeBox.h,
+                    }}
+                  />
+                )}
                 {snapGuides.length > 0 && (
                   <div className="ui-snap-guides" aria-hidden>
                     {snapGuides.map((guide, i) =>

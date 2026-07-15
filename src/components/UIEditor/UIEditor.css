@@ -605,6 +605,43 @@
   border: 2px solid #3b82f6;
   pointer-events: none;
   border-radius: inherit;
+  z-index: 5;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+/* 多选：无锚点，半透明遮罩 + 描边，一眼可辨 */
+.ui-element.multi-selected .ui-element-multi-mask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  border-radius: inherit;
+  box-sizing: border-box;
+  border: 2px solid #38bdf8;
+  background: rgba(56, 189, 248, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px rgba(14, 165, 233, 0.45);
+}
+.ui-element.multi-selected .ui-element-multi-mask::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.35);
+}
+
+.ui-marquee {
+  position: absolute;
+  z-index: 99999;
+  pointer-events: none;
+  border: 1px solid rgba(96, 165, 250, 0.95);
+  background: rgba(59, 130, 246, 0.16);
+  box-sizing: border-box;
 }
 
 .ui-element-placeholder {
