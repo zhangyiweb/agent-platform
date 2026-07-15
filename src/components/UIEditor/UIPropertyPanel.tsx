@@ -8,6 +8,7 @@ import type { ParsedCssResult } from '@/utils/uiCssParser';
 import {
   BOX_SHADOW_PRESETS,
   CANVAS_PRESETS,
+  CANVAS_SIZE_LIMITS,
   FONT_FAMILY_CUSTOM,
   FONT_FAMILY_OPTIONS,
   FONT_WEIGHT_OPTIONS,
@@ -158,19 +159,74 @@ export function UIPropertyPanel() {
         />
       </div>
       <div className="ui-property-row">
-        <label>尺寸</label>
+        <label>预设</label>
         <Select
           {...selectProps}
-          value={`${canvasWidth}x${canvasHeight}`}
+          value={
+            CANVAS_PRESETS.some((p) => p.width === canvasWidth && p.height === canvasHeight)
+              ? `${canvasWidth}x${canvasHeight}`
+              : 'custom'
+          }
           onChange={(val) => {
+            if (val === 'custom') return;
             const preset = CANVAS_PRESETS.find((p) => `${p.width}x${p.height}` === val);
             if (preset) setCanvasSize(preset.width, preset.height);
           }}
-          options={CANVAS_PRESETS.map((p) => ({
-            label: p.label,
-            value: `${p.width}x${p.height}`,
-          }))}
-          style={{ flex: 1 }}
+          options={[
+            ...CANVAS_PRESETS.map((p) => ({
+              label: p.label,
+              value: `${p.width}x${p.height}`,
+            })),
+            ...(CANVAS_PRESETS.some(
+              (p) => p.width === canvasWidth && p.height === canvasHeight
+            )
+              ? []
+              : [
+                  {
+                    label: `自定义（${canvasWidth} × ${canvasHeight}）`,
+                    value: 'custom',
+                  },
+                ]),
+          ]}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+      </div>
+      <div className="ui-property-row">
+        <label>宽度</label>
+        <InputNumber
+          size="small"
+          min={CANVAS_SIZE_LIMITS.min}
+          max={CANVAS_SIZE_LIMITS.max}
+          step={10}
+          value={canvasWidth}
+          onChange={(v) => {
+            const w = Math.round(Number(v) || canvasWidth);
+            const clamped = Math.min(
+              CANVAS_SIZE_LIMITS.max,
+              Math.max(CANVAS_SIZE_LIMITS.min, w)
+            );
+            setCanvasSize(clamped, canvasHeight);
+          }}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+      </div>
+      <div className="ui-property-row">
+        <label>高度</label>
+        <InputNumber
+          size="small"
+          min={CANVAS_SIZE_LIMITS.min}
+          max={CANVAS_SIZE_LIMITS.max}
+          step={10}
+          value={canvasHeight}
+          onChange={(v) => {
+            const h = Math.round(Number(v) || canvasHeight);
+            const clamped = Math.min(
+              CANVAS_SIZE_LIMITS.max,
+              Math.max(CANVAS_SIZE_LIMITS.min, h)
+            );
+            setCanvasSize(canvasWidth, clamped);
+          }}
+          style={{ flex: 1, minWidth: 0 }}
         />
       </div>
       <div className="ui-property-row">

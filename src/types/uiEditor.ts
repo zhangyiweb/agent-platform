@@ -148,11 +148,19 @@ export interface CanvasPreset {
 
 export const CANVAS_PRESETS: CanvasPreset[] = [
   { label: '1920 × 1080', width: 1920, height: 1080 },
+  { label: '2560 × 1440', width: 2560, height: 1440 },
+  { label: '3840 × 2160', width: 3840, height: 2160 },
   { label: '1366 × 768', width: 1366, height: 768 },
   { label: '1440 × 900', width: 1440, height: 900 },
   { label: '375 × 812', width: 375, height: 812 },
   { label: '750 × 1334', width: 750, height: 1334 },
 ];
+
+/** 自定义画布尺寸合法范围 */
+export const CANVAS_SIZE_LIMITS = {
+  min: 30,
+  max: 7680,
+} as const;
 
 export const FONT_FAMILY_CUSTOM = '__custom__';
 

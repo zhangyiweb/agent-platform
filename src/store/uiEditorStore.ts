@@ -544,7 +544,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
     }));
   },
 
-  setZoom: (zoom) => set({ zoom: Math.min(2, Math.max(0.1, zoom)) }),
+  setZoom: (zoom) => set({ zoom: Math.min(3, Math.max(0.1, zoom)) }),
 
   toggleGrid: () => set({ showGrid: !get().showGrid }),
 

@@ -112,7 +112,7 @@ export function UICanvas() {
     const availW = scroll.clientWidth - padding;
     const availH = scroll.clientHeight - padding;
     const scale = Math.min(availW / canvasWidth, availH / canvasHeight);
-    setZoom(Math.max(0.1, Math.min(2, scale)));
+    setZoom(Math.max(0.1, Math.min(3, scale)));
   }, [canvasWidth, canvasHeight, setZoom]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
