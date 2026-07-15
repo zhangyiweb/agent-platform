@@ -6,6 +6,11 @@ export function buildExportedSceneApiScript(hasCameraTour: boolean): string {
   const objectIdIndex = new Map();
   let cameraTweenRaf = 0;
   let transformTweenRaf = 0;
+  const transformRestoreState = new Map();
+
+  function transformRestoreKey(objectId, nodeName) {
+    return String(objectId) + '::' + (nodeName || '');
+  }
 
   function easeInOutCubic(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -203,23 +208,52 @@ export function buildExportedSceneApiScript(hasCameraTour: boolean): string {
       if (!root) return false;
       const node = findNodeByName(root, params.nodeName);
       const duration = params.duration == null ? 1 : params.duration;
-      const endPos = params.position
+      const restoreToggle = Boolean(params.restoreToggle);
+      const stateKey = transformRestoreKey(objectId, params.nodeName);
+
+      let applyPosition = Boolean(params.position);
+      let applyRotation = Boolean(params.rotation);
+      let applyScale = Boolean(params.scale);
+      let endPos = params.position
         ? new THREE.Vector3(params.position.x, params.position.y, params.position.z)
         : node.position.clone();
-      const endRot = params.rotation
+      let endRot = params.rotation
         ? new THREE.Euler(
             THREE.MathUtils.degToRad(params.rotation.x),
             THREE.MathUtils.degToRad(params.rotation.y),
             THREE.MathUtils.degToRad(params.rotation.z)
           )
         : node.rotation.clone();
-      const endScale = params.scale
+      let endScale = params.scale
         ? new THREE.Vector3(params.scale.x, params.scale.y, params.scale.z)
         : node.scale.clone();
+
+      if (restoreToggle) {
+        const state = transformRestoreState.get(stateKey);
+        if (state && state.applied) {
+          endPos = state.position.clone();
+          endRot = new THREE.Euler().setFromQuaternion(state.quaternion);
+          endScale = state.scale.clone();
+          applyPosition = true;
+          applyRotation = true;
+          applyScale = true;
+          state.applied = false;
+        } else if (!state) {
+          transformRestoreState.set(stateKey, {
+            applied: true,
+            position: node.position.clone(),
+            quaternion: node.quaternion.clone(),
+            scale: node.scale.clone(),
+          });
+        } else {
+          state.applied = true;
+        }
+      }
+
       if (duration <= 0) {
-        if (params.position) node.position.copy(endPos);
-        if (params.rotation) node.rotation.copy(endRot);
-        if (params.scale) node.scale.copy(endScale);
+        if (applyPosition) node.position.copy(endPos);
+        if (applyRotation) node.rotation.copy(endRot);
+        if (applyScale) node.scale.copy(endScale);
         return true;
       }
       if (transformTweenRaf) cancelAnimationFrame(transformTweenRaf);
@@ -232,9 +266,9 @@ export function buildExportedSceneApiScript(hasCameraTour: boolean): string {
       const tick = (now) => {
         const t = Math.min(1, (now - start) / durationMs);
         const k = easeInOutCubic(t);
-        if (params.position) node.position.lerpVectors(startPos, endPos, k);
-        if (params.rotation) node.quaternion.slerpQuaternions(startQuat, endQuat, k);
-        if (params.scale) node.scale.lerpVectors(startScale, endScale, k);
+        if (applyPosition) node.position.lerpVectors(startPos, endPos, k);
+        if (applyRotation) node.quaternion.slerpQuaternions(startQuat, endQuat, k);
+        if (applyScale) node.scale.lerpVectors(startScale, endScale, k);
         if (t < 1) transformTweenRaf = requestAnimationFrame(tick);
         else transformTweenRaf = 0;
       };

@@ -45,6 +45,10 @@ export interface UIAction {
     scale?: Vec3Param;
     /** 相机移动过渡秒数，默认 2 */
     duration?: number;
+    /**
+     * 节点变换：开启后再次触发会还原到动作执行前的原始变换（默认关闭）
+     */
+    restoreToggle?: boolean;
     /** @deprecated 仅兼容旧「飞向模型」 */
     distance?: number;
     nodeName?: string;

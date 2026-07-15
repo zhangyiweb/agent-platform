@@ -1,4 +1,4 @@
-import { Button, ColorPicker, Input, InputNumber, Select, Slider } from 'antd';
+import { Button, ColorPicker, Input, InputNumber, Select, Slider, Switch } from 'antd';
 import { useSceneStore } from '@/store/sceneStore';
 import { useTourStore } from '@/store/tourStore';
 import { useUIEditorStore } from '@/store/uiEditorStore';
@@ -517,6 +517,14 @@ export function UIInteractionPanel({ elementId, actions = [] }: UIInteractionPan
                       })
                     }
                     style={{ flex: 1, minWidth: 0 }}
+                  />
+                </div>
+                <div className="ui-property-row">
+                  <label>点击还原</label>
+                  <Switch
+                    size="small"
+                    checked={Boolean(action.params?.restoreToggle)}
+                    onChange={(checked) => updateParams(index, { restoreToggle: checked })}
                   />
                 </div>
               </>

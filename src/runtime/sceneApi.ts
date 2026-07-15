@@ -78,6 +78,8 @@ export interface EditorSceneApi {
       rotation?: Vec3Param;
       scale?: Vec3Param;
       duration?: number;
+      /** 再次触发时还原原始变换 */
+      restoreToggle?: boolean;
     }
   ) => boolean;
   setUIVisible: (elementId: string | string[], mode?: VisibilityMode | boolean) => boolean;
@@ -89,6 +91,21 @@ export interface EditorSceneApi {
 
 let cameraTweenRaf = 0;
 let transformTweenRaf = 0;
+
+/** 节点变换「再次点击还原」运行时状态 */
+const transformRestoreState = new Map<
+  string,
+  {
+    applied: boolean;
+    position: THREE.Vector3;
+    quaternion: THREE.Quaternion;
+    scale: THREE.Vector3;
+  }
+>();
+
+function transformRestoreKey(objectId: string, nodeName?: string) {
+  return `${objectId}::${nodeName || ''}`;
+}
 
 function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
@@ -421,25 +438,55 @@ function createEditorSceneApi(): EditorSceneApi {
       if (!root) return false;
       const node = findNodeByName(root, params.nodeName);
       const duration = params.duration ?? DEFAULT_TRANSFORM_DURATION;
+      const restoreToggle = Boolean(params.restoreToggle);
+      const stateKey = transformRestoreKey(objectId, params.nodeName);
 
-      const endPos = params.position
+      let applyPosition = Boolean(params.position);
+      let applyRotation = Boolean(params.rotation);
+      let applyScale = Boolean(params.scale);
+      let endPos = params.position
         ? new THREE.Vector3(params.position.x, params.position.y, params.position.z)
         : node.position.clone();
-      const endRot = params.rotation
+      let endRot = params.rotation
         ? new THREE.Euler(
             THREE.MathUtils.degToRad(params.rotation.x),
             THREE.MathUtils.degToRad(params.rotation.y),
             THREE.MathUtils.degToRad(params.rotation.z)
           )
         : node.rotation.clone();
-      const endScale = params.scale
+      let endScale = params.scale
         ? new THREE.Vector3(params.scale.x, params.scale.y, params.scale.z)
         : node.scale.clone();
 
+      if (restoreToggle) {
+        const state = transformRestoreState.get(stateKey);
+        if (state?.applied) {
+          // 再次点击：还原到首次执行前的原始变换
+          endPos = state.position.clone();
+          endRot = new THREE.Euler().setFromQuaternion(state.quaternion);
+          endScale = state.scale.clone();
+          applyPosition = true;
+          applyRotation = true;
+          applyScale = true;
+          state.applied = false;
+        } else {
+          if (!state) {
+            transformRestoreState.set(stateKey, {
+              applied: true,
+              position: node.position.clone(),
+              quaternion: node.quaternion.clone(),
+              scale: node.scale.clone(),
+            });
+          } else {
+            state.applied = true;
+          }
+        }
+      }
+
       if (duration <= 0) {
-        if (params.position) node.position.copy(endPos);
-        if (params.rotation) node.rotation.copy(endRot);
-        if (params.scale) node.scale.copy(endScale);
+        if (applyPosition) node.position.copy(endPos);
+        if (applyRotation) node.rotation.copy(endRot);
+        if (applyScale) node.scale.copy(endScale);
         return true;
       }
 
@@ -454,9 +501,9 @@ function createEditorSceneApi(): EditorSceneApi {
       const tick = (now: number) => {
         const t = Math.min(1, (now - start) / durationMs);
         const k = easeInOutCubic(t);
-        if (params.position) node.position.lerpVectors(startPos, endPos, k);
-        if (params.rotation) node.quaternion.slerpQuaternions(startQuat, endQuat, k);
-        if (params.scale) node.scale.lerpVectors(startScale, endScale, k);
+        if (applyPosition) node.position.lerpVectors(startPos, endPos, k);
+        if (applyRotation) node.quaternion.slerpQuaternions(startQuat, endQuat, k);
+        if (applyScale) node.scale.lerpVectors(startScale, endScale, k);
         if (t < 1) transformTweenRaf = requestAnimationFrame(tick);
         else transformTweenRaf = 0;
       };
@@ -585,6 +632,7 @@ export function dispatchUIAction(action: UIAction): boolean {
         rotation: action.params?.rotation,
         scale: action.params?.scale,
         duration: action.params?.duration,
+        restoreToggle: action.params?.restoreToggle,
       });
     case 'camera.set':
       return api.setCamera(
