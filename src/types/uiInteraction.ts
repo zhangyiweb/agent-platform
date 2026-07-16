@@ -31,7 +31,7 @@ export interface UIAction {
   type: UIActionType;
   /** 场景对象 ID / 主目标；多目标时配合 targetIds */
   targetId?: string;
-  /** UI 面板等多选目标 */
+  /** UI 面板 / 模型显隐等多选目标 */
   targetIds?: string[];
   params?: {
     visibilityMode?: VisibilityMode;

@@ -90,8 +90,14 @@ export function UIInteractionPanel({ elementId, actions = [] }: UIInteractionPan
   const tours = useTourStore((s) => s.tours);
 
   const objectOptions = objects
-    .filter((o) => o.type === 'mesh' || o.type === 'group' || o.type === 'particle')
-    .map((o) => ({ label: `${o.name}`, value: o.id }));
+    .filter((o) => o.type === 'mesh' || o.type === 'group' || o.type === 'particle' || o.type === 'label')
+    .map((o) => ({ label: `${o.name}${o.type === 'label' ? '（标签）' : ''}`, value: o.id, type: o.type }));
+
+  /** 选中/材质/变换等动作不含标签；仅显隐可含标签 */
+  const objectOptionsForAction = (type: UIActionType) => {
+    const allowLabel = type === 'object.setVisible';
+    return objectOptions.filter((o) => allowLabel || o.type !== 'label');
+  };
 
   const uiOptions = elements.map((el) => ({
     label: el.id === elementId ? `${el.name}（自身）` : `${el.name}（${el.type}）`,
@@ -243,7 +249,10 @@ export function UIInteractionPanel({ elementId, actions = [] }: UIInteractionPan
                         : nextMeta.targetKind === meta.targetKind
                           ? action.targetId
                           : undefined,
-                    targetIds: nextMeta.targetKind === 'ui' ? action.targetIds : undefined,
+                    targetIds:
+                      nextMeta.targetKind === 'ui' || type === 'object.setVisible'
+                        ? action.targetIds
+                        : undefined,
                     params: {
                       visibilityMode: action.params?.visibilityMode ?? 'toggle',
                       duration:
@@ -284,7 +293,30 @@ export function UIInteractionPanel({ elementId, actions = [] }: UIInteractionPan
               />
             </div>
 
-            {meta.targetKind === 'object' && (
+            {meta.targetKind === 'object' && actionType === 'object.setVisible' && (
+              <div className="ui-property-row">
+                <label>模型</label>
+                <Select
+                  {...selectProps}
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  value={resolveActionTargetIds(action)}
+                  placeholder="可多选场景对象"
+                  style={{ flex: 1, minWidth: 0 }}
+                  options={objectOptionsForAction(actionType)}
+                  onChange={(ids: string[]) =>
+                    updateAction(index, {
+                      targetIds: ids,
+                      targetId: ids[0],
+                    })
+                  }
+                />
+              </div>
+            )}
+
+            {meta.targetKind === 'object' && actionType !== 'object.setVisible' && (
               <div className="ui-property-row">
                 <label>模型</label>
                 <Select
@@ -294,19 +326,17 @@ export function UIInteractionPanel({ elementId, actions = [] }: UIInteractionPan
                   value={action.targetId}
                   placeholder="选择场景对象"
                   style={{ flex: 1, minWidth: 0 }}
-                  options={objectOptions}
+                  options={objectOptionsForAction(actionType)}
                   onChange={(v) => {
                     if (actionType === 'object.setTransform') {
-                      // 一次写入 targetId + 变换，避免二次更新覆盖
                       syncTransformFromModel(index, v, undefined);
                     } else {
-                      updateAction(index, { targetId: v });
+                      updateAction(index, { targetId: v, targetIds: undefined });
                     }
                   }}
                 />
               </div>
             )}
-
             {meta.targetKind === 'ui' && (
               <div className="ui-property-row">
                 <label>面板</label>

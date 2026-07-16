@@ -49,6 +49,7 @@ export function isEditorHelperObject(obj: THREE.Object3D): boolean {
   if (obj.type === 'BatchedRenderer' || obj.type === 'VFXBatch') return true;
   if (obj.name.startsWith('helper_')) return true;
   if (obj.userData?.isEditorHelper) return true;
+  if (obj.userData?.isLabelCssObject) return true;
   if (obj.userData?.tourVisual) return true;
   if (obj.type === 'TransformControlsGizmo') return true;
 

@@ -127,6 +127,7 @@ export async function importUIEditorProjectZip(file: File): Promise<UIEditorImpo
     useUIEditorStore.getState().loadProject({
       pages,
       activePageId: config.activePageId,
+      previewPageId: config.previewPageId,
     });
     return summarizePages(pages);
   }
@@ -164,6 +165,7 @@ export async function importUIEditorProjectJson(file: File): Promise<UIEditorImp
     useUIEditorStore.getState().loadProject({
       pages,
       activePageId: config.activePageId,
+      previewPageId: config.previewPageId,
     });
     return summarizePages(pages);
   }

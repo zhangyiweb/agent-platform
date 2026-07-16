@@ -12,6 +12,8 @@ export interface UIEditorProjectFile {
   version: string;
   exportTime: string;
   activePageId?: string;
+  /** 联动预览展示的画布 */
+  previewPageId?: string;
   /** v2：多画布 */
   pages?: UIPage[];
   /** v1 兼容：单画布 */
@@ -77,6 +79,7 @@ ${list}
 export async function saveUIEditorProject(): Promise<UIEditorSaveResult> {
   const pages = useUIEditorStore.getState().getPagesSnapshot();
   const activePageId = useUIEditorStore.getState().activePageId;
+  const previewPageId = useUIEditorStore.getState().previewPageId;
 
   if (pages.length === 0) {
     throw new Error('没有可保存的画布');
@@ -150,6 +153,7 @@ export async function saveUIEditorProject(): Promise<UIEditorSaveResult> {
     version: UI_EDITOR_PROJECT_VERSION,
     exportTime,
     activePageId,
+    previewPageId,
     pages: exportedPages,
   };
 

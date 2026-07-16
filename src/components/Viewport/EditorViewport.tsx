@@ -34,6 +34,9 @@ import {
   applyDirectionalShadowSettings,
   DEFAULT_TONE_MAPPING_EXPOSURE,
 } from '@/config/defaultLighting';
+import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { CSS3DRenderer } from 'three/addons/renderers/CSS3DRenderer.js';
+import { resolveLabelIdFromIntersect, hitTestLabelAtClientPoint, syncLabelObjectScaleVisual, bindLabelUiInteractions } from '@/utils/sceneLabel';
 
 const CLICK_DRAG_THRESHOLD_PX = 5;
 
@@ -161,6 +164,8 @@ export function EditorViewport() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const css2dRendererRef = useRef<CSS2DRenderer | null>(null);
+  const css3dRendererRef = useRef<CSS3DRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const gizmoHelperRef = useRef<THREE.Object3D | null>(null);
@@ -381,9 +386,23 @@ export function EditorViewport() {
     renderer.toneMappingExposure = savedToneMappingExposure;
     (renderer as { useLegacyLights?: boolean }).useLegacyLights = savedUseLegacyLights;
     applyRendererLightingDefaults(renderer, savedToneMappingExposure);
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.inset = '0';
+    renderer.domElement.style.zIndex = '1';
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
     (window as any).__editorRenderer = renderer;
+
+    // CSS 渲染层保持在 WebGL 画布之上
+    const css2d = css2dRendererRef.current;
+    const css3d = css3dRendererRef.current;
+    if (css2d?.domElement) {
+      containerRef.current.appendChild(css2d.domElement);
+    }
+    if (css3d?.domElement) {
+      containerRef.current.appendChild(css3d.domElement);
+    }
 
     // 重绑 OrbitControls（保留 target / 阻尼等内部状态，勿 dispose 后重建）
     if (controls) {
@@ -475,6 +494,46 @@ export function EditorViewport() {
     applyRendererLightingDefaults(renderer, DEFAULT_TONE_MAPPING_EXPOSURE);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    // CSS2D / CSS3D 叠加层：必须让子节点也 pointer-events:none，
+    // 否则默认 auto 的子元素会挡住 WebGL 画布，导致无法选中/拖动 Gizmo
+    const mountCssOverlay = (dom: HTMLElement, zIndex: string) => {
+      dom.classList.add('editor-css-overlay');
+      dom.style.position = 'absolute';
+      dom.style.inset = '0';
+      dom.style.width = '100%';
+      dom.style.height = '100%';
+      dom.style.pointerEvents = 'none';
+      dom.style.overflow = 'hidden';
+      dom.style.zIndex = zIndex;
+      if (!dom.querySelector('style[data-editor-css-overlay]')) {
+        const style = document.createElement('style');
+        style.setAttribute('data-editor-css-overlay', '1');
+        style.textContent =
+          '.editor-css-overlay, .editor-css-overlay * { pointer-events: none !important; }' +
+          '.editor-css-overlay.is-preview-interactive .scene-label-ui-root .ui-interactive,' +
+          '.editor-css-overlay.is-preview-interactive .scene-label-ui-root .ui-interactive * {' +
+          'pointer-events: auto !important; cursor: pointer; }';
+        dom.appendChild(style);
+      }
+      containerRef.current!.appendChild(dom);
+    };
+
+    // 画布垫底，HTML 标签叠在上面（仅视觉；事件穿透到 canvas）
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.inset = '0';
+    renderer.domElement.style.zIndex = '1';
+
+    const css2d = new CSS2DRenderer();
+    css2d.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    mountCssOverlay(css2d.domElement, '2');
+    css2dRendererRef.current = css2d;
+
+    const css3d = new CSS3DRenderer();
+    css3d.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    mountCssOverlay(css3d.domElement, '3');
+    css3dRendererRef.current = css3d;
 
     // 添加轨道控制器
     const controls = new OrbitControls(cameraObj, renderer.domElement);
@@ -623,6 +682,16 @@ export function EditorViewport() {
               scale: endState.scale as [number, number, number],
             };
 
+            useSceneStore.getState().updateObject(transformObjectId, {
+              position: after.position,
+              rotation: after.rotation,
+              scale: after.scale,
+            });
+
+            if (hasScaled) {
+              syncLabelObjectScaleVisual(obj);
+            }
+
             useHistoryStore.getState().push({
               type: actionType,
               description: `${actionType} object`,
@@ -697,6 +766,9 @@ export function EditorViewport() {
 
     // 点击事件处理 (对象选择)
     const handleClick = (event: MouseEvent) => {
+      // 联动预览：禁止选中模型/标签，仅允许 UI / 标签内交互
+      if (useEditorStore.getState().editorMode === 'preview') return;
+
       const renderer = rendererRef.current;
       const cameraObj = cameraRef.current;
       const scene = sceneRef.current;
@@ -708,6 +780,18 @@ export function EditorViewport() {
       if (Math.sqrt(dragDx * dragDx + dragDy * dragDy) > CLICK_DRAG_THRESHOLD_PX) return;
 
       if (transformControls.dragging || gizmoWasDraggingRef.current) return;
+
+      // 优先：按标签 HTML 屏幕矩形命中（CSS3D / 大 UI 页不依赖小拾取球）
+      const labelHitId = hitTestLabelAtClientPoint(event.clientX, event.clientY);
+      if (labelHitId) {
+        const anchor = useSceneStore.getState().getThreeObject(labelHitId);
+        if (anchor) {
+          useLightStore.getState().selectLight(null);
+          useSceneStore.getState().selectObject(labelHitId);
+          transformControls.attach(anchor);
+          return;
+        }
+      }
 
       const rect = renderer.domElement.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -768,6 +852,17 @@ export function EditorViewport() {
             useLightStore.getState().selectLight(lightId);
             transformControls.attach(getLightTransformAttachObject(light));
             transformControls.setMode('translate');
+            return;
+          }
+        }
+
+        const labelId = resolveLabelIdFromIntersect(hitObject);
+        if (labelId) {
+          const anchor = useSceneStore.getState().getThreeObject(labelId);
+          if (anchor) {
+            useLightStore.getState().selectLight(null);
+            useSceneStore.getState().selectObject(labelId);
+            transformControls.attach(anchor);
             return;
           }
         }
@@ -1118,6 +1213,11 @@ export function EditorViewport() {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
     }
+
+    if (sceneRef.current && cameraRef.current) {
+      css3dRendererRef.current?.render(sceneRef.current, cameraRef.current);
+      css2dRendererRef.current?.render(sceneRef.current, cameraRef.current);
+    }
   }, [applyPostProcessEffect]);
 
   const lastViewportSizeRef = useRef({ w: 0, h: 0 });
@@ -1137,6 +1237,8 @@ export function EditorViewport() {
     cameraRef.current.aspect = width / height;
     cameraRef.current.updateProjectionMatrix();
     rendererRef.current.setSize(width, height);
+    css2dRendererRef.current?.setSize(width, height);
+    css3dRendererRef.current?.setSize(width, height);
 
     if (composerRef.current) {
       composerRef.current.setSize(width, height);
@@ -1245,6 +1347,16 @@ export function EditorViewport() {
         rendererRef.current.dispose();
         rendererRef.current = null;
       }
+
+      const removeCssDom = (el: HTMLElement | null | undefined) => {
+        if (el && containerRef.current?.contains(el)) {
+          containerRef.current.removeChild(el);
+        }
+      };
+      removeCssDom(css2dRendererRef.current?.domElement);
+      removeCssDom(css3dRendererRef.current?.domElement);
+      css2dRendererRef.current = null;
+      css3dRendererRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 视口生命周期内只初始化一次
   }, []);
@@ -1272,6 +1384,36 @@ export function EditorViewport() {
     if (tc) {
       tc.visible = !isPreview;
       tc.enabled = !isPreview;
+      if (isPreview) {
+        tc.detach();
+        useSceneStore.getState().deselectAll();
+        useLightStore.getState().selectLight(null);
+      }
+    }
+
+    // 预览：标签内 UI 可点击；编辑：全部穿透到画布
+    css2dRendererRef.current?.domElement.classList.toggle('is-preview-interactive', isPreview);
+    css3dRendererRef.current?.domElement.classList.toggle('is-preview-interactive', isPreview);
+
+    if (isPreview) {
+      // 重新绑定标签内交互（UI 编排改完动作后进入预览即生效）
+      const { objects, getThreeObject } = useSceneStore.getState();
+      objects.forEach((obj) => {
+        if (obj.type !== 'label' || !obj.label?.uiPageId) return;
+        const anchor = getThreeObject(obj.id);
+        if (!anchor) return;
+        anchor.traverse((child) => {
+          if (!child.userData?.isLabelCssObject && child.name !== 'label_css_object') return;
+          const el =
+            (child as { element?: HTMLElement }).element ||
+            null;
+          if (!el) return;
+          const root = el.querySelector('.scene-label-ui-root') as HTMLElement | null;
+          if (root && obj.label?.uiPageId) {
+            bindLabelUiInteractions(root, obj.label.uiPageId);
+          }
+        });
+      });
     }
   }, [gridVisible, axesVisible, editorMode]);
 

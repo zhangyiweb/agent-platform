@@ -390,10 +390,14 @@ export async function exportProjectPackage(
 
   const exportTitle = `数字孪生场景 ${new Date(baseConfig.exportTime).toLocaleString('zh-CN')}`;
 
-  // —— 合并 UI 叠层 ——
+  // —— 合并 UI 叠层（使用「预览画布」所选页面，默认第一页）——
   const uiState = useUIEditorStore.getState();
+  const snap = uiState.getPagesSnapshot();
   const activePage =
-    uiState.pages.find((p) => p.id === uiState.activePageId) ?? uiState.pages[0] ?? null;
+    snap.find((p) => p.id === uiState.previewPageId) ??
+    snap.find((p) => p.id === uiState.activePageId) ??
+    snap[0] ??
+    null;
   const uiElements = activePage?.elements?.length ? activePage.elements : uiState.elements;
   const shouldMergeUI =
     options.mergeUI !== false && Array.isArray(uiElements) && uiElements.length > 0;

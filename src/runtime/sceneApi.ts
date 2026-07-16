@@ -599,10 +599,15 @@ function createEditorSceneApi(): EditorSceneApi {
 export function dispatchUIAction(action: UIAction): boolean {
   const api = window.sceneApi ?? ensureEditorSceneApi();
   switch (action.type) {
-    case 'object.setVisible':
-      if (!action.targetId) return false;
-      return api.setVisible(action.targetId, resolveVisibilityMode(action.params));
-    case 'object.select':
+    case 'object.setVisible': {
+      const ids = resolveActionTargetIds(action);
+      if (ids.length === 0) return false;
+      let ok = false;
+      for (const id of ids) {
+        if (api.setVisible(id, resolveVisibilityMode(action.params))) ok = true;
+      }
+      return ok;
+    }    case 'object.select':
       if (!action.targetId) return false;
       return api.select(action.targetId);
     case 'object.focus':

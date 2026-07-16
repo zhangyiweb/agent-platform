@@ -8,6 +8,7 @@ import type { UIElement } from '@/types/uiEditor';
 
 /**
  * 联动预览：UI 叠在 3D 上。
+ * 展示「预览画布」下拉所选页面（默认第一页），与当前编辑页可不同。
  * 大图 base64 不走 CSS 字符串（会卡主线程），改为挂载后写 inline style。
  */
 export function SceneUIPreviewOverlay() {
@@ -15,7 +16,10 @@ export function SceneUIPreviewOverlay() {
   const styleRef = useRef<HTMLStyleElement | null>(null);
   const [ready, setReady] = useState(false);
 
+  const previewPageId = useUIEditorStore((s) => s.previewPageId);
+  const pages = useUIEditorStore((s) => s.pages);
   const elements = useUIEditorStore((s) => s.elements);
+  const activePageId = useUIEditorStore((s) => s.activePageId);
   const canvasWidth = useUIEditorStore((s) => s.canvasWidth);
   const canvasHeight = useUIEditorStore((s) => s.canvasHeight);
 
@@ -27,16 +31,25 @@ export function SceneUIPreviewOverlay() {
     let cancelled = false;
     setReady(false);
 
-    // 推迟到下一帧，避免点「联动预览」时同步卡死
     const timer = window.setTimeout(() => {
       if (cancelled || !hostRef.current) return;
 
-      // 导出时仍带图；预览 CSS 里跳过 data URL，防止巨型 style 文本卡死
-      const elementsForCss = stripDataUrlBackgrounds(elements);
+      const snap = useUIEditorStore.getState().getPagesSnapshot();
+      const page =
+        snap.find((p) => p.id === previewPageId) ??
+        snap[0] ??
+        null;
+      if (!page) return;
+
+      const pageElements = page.elements;
+      const pageWidth = page.canvasWidth;
+      const pageHeight = page.canvasHeight;
+
+      const elementsForCss = stripDataUrlBackgrounds(pageElements);
       const bundle = buildUIExportBundle(
         elementsForCss,
-        canvasWidth,
-        canvasHeight,
+        pageWidth,
+        pageHeight,
         'transparent',
         undefined,
         { includeHidden: true }
@@ -57,9 +70,11 @@ export function SceneUIPreviewOverlay() {
 
       const host = hostRef.current;
       host.innerHTML = bundle.bodyHtml;
-      applyInlineAssets(host, elements);
+      host.dataset.designWidth = String(pageWidth);
+      host.dataset.designHeight = String(pageHeight);
+      applyInlineAssets(host, pageElements);
 
-      const bindings = collectUIBindings(elements);
+      const bindings = collectUIBindings(pageElements);
       const cleanups: Array<() => void> = [];
 
       bindings.forEach((entry) => {
@@ -67,7 +82,6 @@ export function SceneUIPreviewOverlay() {
         if (!el) return;
         el.classList.add('ui-interactive');
 
-        // 按触发类型分组：同一 click 一次执行全部动作
         const byTrigger = new Map<string, typeof entry.actions>();
         (entry.actions || []).forEach((action) => {
           const trigger = action.trigger || 'click';
@@ -91,7 +105,6 @@ export function SceneUIPreviewOverlay() {
 
       setReady(true);
 
-      // 清理闭包保存在 host dataset，卸载时执行
       (host as HTMLElement & { __previewCleanups?: Array<() => void> }).__previewCleanups =
         cleanups;
     }, 0);
@@ -111,27 +124,32 @@ export function SceneUIPreviewOverlay() {
       styleRef.current?.remove();
       styleRef.current = null;
     };
-  }, [elements, canvasWidth, canvasHeight]);
+  }, [
+    previewPageId,
+    pages,
+    elements,
+    activePageId,
+    canvasWidth,
+    canvasHeight,
+  ]);
 
   return (
-      <div
-        ref={hostRef}
-        id="ui-overlay"
-        className="ui-page"
-        data-design-width={canvasWidth}
-        data-design-height={canvasHeight}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          zIndex: 12,
-          pointerEvents: 'none',
-          background: 'transparent',
-          overflow: 'hidden',
-          opacity: ready ? 1 : 0,
-        }}
-      />
+    <div
+      ref={hostRef}
+      id="ui-overlay"
+      className="ui-page"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 12,
+        pointerEvents: 'none',
+        background: 'transparent',
+        overflow: 'hidden',
+        opacity: ready ? 1 : 0,
+      }}
+    />
   );
 }
 

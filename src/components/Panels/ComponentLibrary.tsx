@@ -9,11 +9,14 @@ import { createParticleEmitter } from '@/utils/particleScene';
 import { getParticleSpawnTransform } from '@/particles/quarksAdapter';
 import { PARTICLE_PRESETS } from '@/particles/particlePresets';
 import type { ParticlePresetId } from '@/types/particle';
+import type { SceneLabelMode } from '@/types/sceneLabel';
+import { createDefaultLabelConfig, SCENE_LABEL_MODE_OPTIONS } from '@/types/sceneLabel';
+import { createLabelAnchor } from '@/utils/sceneLabel';
 
 export function ComponentLibrary() {
   const { addLight, selectLight } = useLightStore();
   const { addSceneObject, selectObject, deselectAll } = useSceneStore();
-  const [activeTab, setActiveTab] = useState<'geometry' | 'lights' | 'particles'>('geometry');
+  const [activeTab, setActiveTab] = useState<'geometry' | 'lights' | 'particles' | 'labels'>('geometry');
 
   const handleAddLight = (type: 'ambient' | 'directional' | 'point' | 'spot' | 'hemisphere') => {
     const lightConfigs: Record<string, any> = {
@@ -107,6 +110,42 @@ export function ComponentLibrary() {
     }
   };
 
+  const handleAddLabel = (mode: SceneLabelMode) => {
+    const scene = (window as any).__editorScene;
+    if (!scene) return;
+
+    const meta = SCENE_LABEL_MODE_OPTIONS.find((o) => o.value === mode);
+    const id = `label_${Date.now()}`;
+    const name = meta?.label ?? '标签';
+    const label = createDefaultLabelConfig(mode);
+    label.text = name;
+
+    const anchor = createLabelAnchor(id, name, label);
+    anchor.position.set(0, 2, 0);
+    scene.add(anchor);
+
+    addSceneObject({
+      id,
+      name,
+      type: 'label',
+      visible: true,
+      position: [0, 2, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label,
+    });
+
+    useSceneStore.getState().registerThreeObject(id, anchor);
+
+    selectLight(null);
+    selectObject(id);
+
+    const transformControls = (window as any).__editorTransformControls;
+    if (transformControls) {
+      transformControls.attach(anchor);
+    }
+  };
+
   const handleAddParticle = (presetId: ParticlePresetId) => {
     const scene = (window as any).__editorScene;
     if (!scene) return;
@@ -185,13 +224,16 @@ export function ComponentLibrary() {
     <div className="h-full flex flex-col bg-gray-900 border-t border-gray-700">
       <div className="flex border-b border-gray-700">
         <button type="button" onClick={() => setActiveTab('lights')} className={tabClass('lights')}>
-          💡 灯光
+          灯光
         </button>
         <button type="button" onClick={() => setActiveTab('geometry')} className={tabClass('geometry')}>
-          📦 几何体
+          几何体
         </button>
         <button type="button" onClick={() => setActiveTab('particles')} className={tabClass('particles')}>
-          ✨ 粒子
+          粒子
+        </button>
+        <button type="button" onClick={() => setActiveTab('labels')} className={tabClass('labels')}>
+          标签
         </button>
       </div>
 
@@ -230,6 +272,27 @@ export function ComponentLibrary() {
                   className={itemButtonClass}
                 >
                   {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'labels' && (
+          <div>
+            <p className="text-[10px] text-gray-500 mb-2">
+              HTML 标签：CSS2D / CSS3D / CSS3DSprite。可绑定「UI 编排」页面，把界面嵌进场景标签。
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              {SCENE_LABEL_MODE_OPTIONS.map(({ value, label, desc }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => handleAddLabel(value)}
+                  className={`${itemButtonClass} text-left !py-2`}
+                >
+                  <div className="text-xs font-medium text-white">{label}</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5 leading-snug">{desc}</div>
                 </button>
               ))}
             </div>

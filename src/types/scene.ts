@@ -1,13 +1,20 @@
+import type { SceneLabelConfig } from './sceneLabel';
+
+export type { SceneLabelConfig, SceneLabelMode, SceneLabelContentMode } from './sceneLabel';
+export { createDefaultLabelConfig, SCENE_LABEL_MODE_OPTIONS } from './sceneLabel';
+
 // 场景对象类型
 export interface SceneObject {
   id: string;
   name: string;
-  type: 'mesh' | 'light' | 'camera' | 'group' | 'particle';
+  type: 'mesh' | 'light' | 'camera' | 'group' | 'particle' | 'label';
   visible: boolean;
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
   children?: SceneObject[];
+  /** 场景 HTML 标签（CSS2D / CSS3D / CSS3DSprite） */
+  label?: SceneLabelConfig;
 }
 
 // 材质参数类型

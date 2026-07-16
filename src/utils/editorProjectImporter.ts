@@ -10,6 +10,8 @@ import type { CameraTour } from '@/types/cameraTour';
 import type { TextureUvAnimationConfig } from '@/types/textureAnimation';
 import type { ParticleEmitterConfig } from '@/types/particle';
 import { restoreParticleEmitters } from '@/utils/particleScene';
+import { createLabelAnchor } from '@/utils/sceneLabel';
+import { createDefaultLabelConfig, resolveLabelScale } from '@/types/sceneLabel';
 import type { ExportedTextureUvState } from '@/utils/textureUvUtils';
 import { clearEditorScene } from '@/utils/clearEditorScene';
 import { restoreEditorObjectIds } from '@/utils/exportSceneRestore';
@@ -333,7 +335,7 @@ async function restoreProjectConfig(
   }
 
   registerEditorObjects(
-    editorObjects.filter((o) => o.type !== 'particle'),
+    editorObjects.filter((o) => o.type !== 'particle' && o.type !== 'label'),
     modelRoot
   );
   syncStoreFromLoadedObjects();
@@ -341,6 +343,26 @@ async function restoreProjectConfig(
   const particleObjects = editorObjects.filter((o) => o.type === 'particle');
   if (particleObjects.length > 0) {
     restoreParticleEmitters(scene, particles, particleObjects);
+  }
+
+  const labelObjects = editorObjects.filter((o) => o.type === 'label');
+  if (labelObjects.length > 0) {
+    const { addObject, registerThreeObject } = useSceneStore.getState();
+    labelObjects.forEach((obj) => {
+      const cfg = {
+        ...createDefaultLabelConfig(obj.label?.mode ?? 'css2d'),
+        ...obj.label,
+        scale: resolveLabelScale(obj.label),
+      };
+      const anchor = createLabelAnchor(obj.id, obj.name, cfg);
+      anchor.position.set(...obj.position);
+      anchor.rotation.set(...obj.rotation);
+      anchor.scale.set(...obj.scale);
+      anchor.visible = obj.visible;
+      scene.add(anchor);
+      registerThreeObject(obj.id, anchor);
+      addObject({ ...obj, label: cfg });
+    });
   }
 
   if (Object.keys(textureUvStates).length > 0) {

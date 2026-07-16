@@ -233,7 +233,12 @@ export function Toolbar() {
             <button
               type="button"
               className={`editor-mode-btn ${editorMode === 'scene' ? 'active' : ''}`}
-              onClick={() => setEditorMode('scene')}
+              onClick={() => {
+                // 切回场景前把当前 UI 页写回 pages，保证标签绑定下拉同步
+                const snap = useUIEditorStore.getState().getPagesSnapshot();
+                useUIEditorStore.setState({ pages: snap });
+                setEditorMode('scene');
+              }}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M2 4L8 1L14 4V12L8 15L2 12V4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>

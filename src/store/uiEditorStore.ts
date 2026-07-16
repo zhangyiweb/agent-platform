@@ -143,6 +143,8 @@ function flushAndOptionalSwitch(
 interface UIEditorState {
   pages: UIPage[];
   activePageId: string;
+  /** 联动预览展示的画布；默认第一页 */
+  previewPageId: string;
   elements: UIElement[];
   selectedId: string | null;
   /** 多选（框选）；与 selectedId 同步，selectedId 为最后选中项供属性面板使用 */
@@ -189,6 +191,8 @@ interface UIEditorActions {
   renamePage: (pageId: string, name: string) => void;
   /** 删除画布（至少保留一页） */
   removePage: (pageId: string) => void;
+  /** 设置联动预览展示的画布 */
+  setPreviewPageId: (pageId: string) => void;
   /** 复制当前或指定画布 */
   duplicatePage: (pageId?: string) => string;
   /** 获取已 flush 的全部页面快照（导出/保存用） */
@@ -201,6 +205,7 @@ interface UIEditorActions {
     canvasBackground?: string;
     elements?: UIElement[];
     activePageId?: string;
+    previewPageId?: string;
   }) => void;
   /** 当前 UI 项目是否有内容（用于打开项目前提示覆盖） */
   hasContent: () => boolean;
@@ -213,6 +218,7 @@ const initialPage = createEmptyPage('页面 1');
 export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, get) => ({
   pages: [initialPage],
   activePageId: initialPage.id,
+  previewPageId: initialPage.id,
   elements: [],
   selectedId: null,
   selectedIds: [],
@@ -781,6 +787,11 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
       return {
         pages: nextPages,
         activePageId: nextActive.id,
+        previewPageId:
+          state.previewPageId === pageId ||
+          !nextPages.some((p) => p.id === state.previewPageId)
+            ? nextPages[0].id
+            : state.previewPageId,
         elements: switching ? cloneElements(nextActive.elements) : state.elements,
         canvasWidth: switching ? nextActive.canvasWidth : state.canvasWidth,
         canvasHeight: switching ? nextActive.canvasHeight : state.canvasHeight,
@@ -789,6 +800,12 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
         selectedIds: switching ? [] : state.selectedIds,
       };
     });
+  },
+
+  setPreviewPageId: (pageId) => {
+    const exists = get().pages.some((p) => p.id === pageId);
+    if (!exists) return;
+    set({ previewPageId: pageId });
   },
 
   duplicatePage: (pageId) => {
@@ -863,10 +880,13 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
 
     const active =
       pages.find((p) => p.id === project.activePageId) ?? pages[0];
+    const preview =
+      pages.find((p) => p.id === project.previewPageId) ?? pages[0];
 
     set({
       pages,
       activePageId: active.id,
+      previewPageId: preview.id,
       elements: cloneElements(active.elements),
       canvasWidth: active.canvasWidth,
       canvasHeight: active.canvasHeight,

@@ -4,6 +4,7 @@ import { useLightStore } from '@/store/lightStore';
 import { useAnimationStore } from '@/store/animationStore';
 import { useParticleStore } from '@/store/particleStore';
 import { disposeAllParticleSystems } from '@/utils/particleScene';
+import { disposeLabelAnchor } from '@/utils/sceneLabel';
 import { useHistoryStore } from '@/store/historyStore';
 import { useTourStore } from '@/store/tourStore';
 import { disposeObject3DResources, isEditorHelperObject } from '@/utils/sceneUtils';
@@ -30,6 +31,7 @@ export function clearEditorScene() {
     });
     toRemove.forEach((obj) => {
       scene.remove(obj);
+      disposeLabelAnchor(obj);
       disposeObject3DResources(obj);
     });
   }

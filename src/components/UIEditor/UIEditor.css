@@ -331,9 +331,9 @@
 }
 
 .ui-canvas-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
   background: #1e2129;
@@ -347,7 +347,15 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex: 1;
+  justify-self: start;
+}
+
+.ui-canvas-toolbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  min-width: 0;
 }
 
 .ui-page-tabs {
@@ -432,6 +440,20 @@
   background: rgba(59, 130, 246, 0.12);
 }
 
+.ui-preview-page-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.ui-preview-page-picker .ui-preview-page-select {
+  min-width: 140px;
+  max-width: 200px;
+}
+
 .ui-canvas-info {
   flex-shrink: 0;
   color: #9ca3af;
@@ -442,6 +464,7 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  justify-self: end;
 }
 
 .ui-zoom-btn {

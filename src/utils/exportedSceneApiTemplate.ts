@@ -302,9 +302,18 @@ export function buildExportedSceneApiScript(hasCameraTour: boolean): string {
     dispatch(action) {
       if (!action || !action.type) return false;
       switch (action.type) {
-        case 'object.setVisible':
-          return this.setVisible(action.targetId, resolveVisibilityMode(action.params));
-        case 'object.select':
+        case 'object.setVisible': {
+          const ids = []
+            .concat(action.targetIds || [])
+            .concat(action.targetId ? [action.targetId] : []);
+          const unique = Array.from(new Set(ids.filter(Boolean)));
+          if (!unique.length) return false;
+          let ok = false;
+          unique.forEach((id) => {
+            if (this.setVisible(id, resolveVisibilityMode(action.params))) ok = true;
+          });
+          return ok;
+        }        case 'object.select':
           return this.select(action.targetId);
         case 'object.focus':
           return this.focus(action.targetId, {

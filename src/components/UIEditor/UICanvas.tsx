@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Select } from 'antd';
 import {
   getAbsolutePosition,
   getDeepestSelectedIds,
@@ -38,6 +39,7 @@ export function UICanvas() {
     showGrid,
     pages,
     activePageId,
+    previewPageId,
     addElement,
     selectElement,
     setSelectedIds,
@@ -54,6 +56,7 @@ export function UICanvas() {
     addPage,
     switchPage,
     removePage,
+    setPreviewPageId,
   } = useUIEditorStore();
   const editorMode = useEditorStore((s) => s.editorMode);
 
@@ -744,6 +747,32 @@ export function UICanvas() {
             {canvasWidth} × {canvasHeight}
           </span>
         </div>
+
+        <div className="ui-canvas-toolbar-center">
+          <label
+            className="ui-preview-page-picker"
+            title="进入顶部「联动预览」时，叠在 3D 场景上显示的界面画布"
+          >
+            <span>联动预览显示</span>
+            <Select
+              size="small"
+              className="export-panel-select ui-preview-page-select"
+              classNames={{ popup: { root: 'export-panel-select-popup' } }}
+              value={
+                pages.some((p) => p.id === previewPageId)
+                  ? previewPageId
+                  : pages[0]?.id
+              }
+              options={pages.map((page) => ({
+                value: page.id,
+                label: page.name,
+              }))}
+              onChange={(id) => setPreviewPageId(id)}
+              popupMatchSelectWidth={false}
+            />
+          </label>
+        </div>
+
         <div className="ui-canvas-zoom">
           <button
             type="button"

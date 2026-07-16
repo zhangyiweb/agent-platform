@@ -12,8 +12,10 @@ import {
   AppstoreOutlined,
   BlockOutlined,
   CloudOutlined,
+  TagOutlined,
 } from '@ant-design/icons';
 import { disposeObject3DResources, findThreeObjectById } from '@/utils/sceneUtils';
+import { disposeLabelAnchor } from '@/utils/sceneLabel';
 import * as THREE from 'three';
 
 interface TreeNode {
@@ -21,7 +23,7 @@ interface TreeNode {
   id: string;
   uuid: string;
   name: string;
-  type: 'model' | 'group' | 'mesh' | 'light' | 'particle';
+  type: 'model' | 'group' | 'mesh' | 'light' | 'particle' | 'label';
   children: TreeNode[];
 }
 
@@ -37,6 +39,7 @@ function isHelperObject(obj: THREE.Object3D): boolean {
     obj.userData?.isParticlePoints === true ||
     obj.userData?.isParticlePickProxy === true ||
     obj.userData?.isEditorHelper === true ||
+    obj.userData?.isLabelCssObject === true ||
     obj.userData?.isLightTarget === true ||
     obj.type === 'TransformControlsGizmo' ||
     (obj.children.length === 2 && obj.children[0]?.type === 'TransformControlsGizmo') ||
@@ -104,6 +107,8 @@ function TreeNodeItem({
       <BulbOutlined className="text-yellow-400 scene-tree-icon" />
     ) : node.type === 'particle' ? (
       <CloudOutlined className="text-purple-400 scene-tree-icon" />
+    ) : node.type === 'label' ? (
+      <TagOutlined className="text-cyan-400 scene-tree-icon" />
     ) : node.type === 'mesh' ? (
       <BlockOutlined className="text-blue-400 scene-tree-icon" />
     ) : node.type === 'group' ? (
@@ -228,7 +233,9 @@ export function SceneTree() {
     const id = obj.userData?.id || obj.userData?.businessId || obj.uuid;
 
     let type: TreeNode['type'] = 'model';
-    if (obj.userData?.isParticleEmitter) {
+    if (obj.userData?.type === 'label' || obj.userData?.labelConfig) {
+      type = 'label';
+    } else if (obj.userData?.isParticleEmitter) {
       type = 'particle';
     } else if (obj instanceof THREE.Mesh) type = 'mesh';
     else if (obj instanceof THREE.Group || children.length > 0) type = 'group';
@@ -237,9 +244,9 @@ export function SceneTree() {
       key: `obj-${obj.uuid}`,
       id,
       uuid: obj.uuid,
-      name: name || (type === 'mesh' ? 'Mesh' : 'Group'),
+      name: name || (type === 'mesh' ? 'Mesh' : type === 'label' ? '标签' : 'Group'),
       type,
-      children,
+      children: type === 'label' ? [] : children,
     };
   }, []);
 
@@ -357,6 +364,7 @@ export function SceneTree() {
       }
 
       targetObj.parent?.remove(targetObj);
+      disposeLabelAnchor(targetObj);
       disposeObject3DResources(targetObj);
 
       const storeId = objects.find((o) => o.id === node.id || o.id === targetObj.uuid)?.id;

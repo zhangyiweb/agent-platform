@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { MaterialEditor } from './MaterialEditor';
 import { GlobalSettings } from './GlobalSettings';
 import { ParticleEditor } from './ParticleEditor';
+import { LabelEditor } from './LabelEditor';
 
 export function PropertyPanel() {
   const { selectedIds, objects, updateObject, getThreeObject } = useSceneStore();
@@ -607,6 +608,7 @@ export function PropertyPanel() {
   }
 
   const isParticle = selectedObject?.type === 'particle';
+  const isLabel = selectedObject?.type === 'label';
 
   // 选中粒子发射器 — 单页粒子参数（显隐由「启用」统一控制）
   if (isParticle && selectedObject) {
@@ -614,6 +616,17 @@ export function PropertyPanel() {
       <div className="h-full flex flex-col bg-gray-900">
         <div className="flex-1 overflow-y-auto">
           <ParticleEditor objectId={selectedObject.id} />
+        </div>
+      </div>
+    );
+  }
+
+  // 选中场景标签 — CSS2D / CSS3D / CSS3DSprite
+  if (isLabel && selectedObject) {
+    return (
+      <div className="h-full flex flex-col bg-gray-900">
+        <div className="flex-1 overflow-y-auto">
+          <LabelEditor objectId={selectedObject.id} />
         </div>
       </div>
     );
