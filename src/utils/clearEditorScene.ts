@@ -44,4 +44,7 @@ export function clearEditorScene() {
   useTourStore.getState().loadTours([], null);
   useLightStore.getState().replaceLights([]);
   useLightStore.getState().selectLight(null);
+
+  // 通知视口丢弃 lightsRef 中的旧灯光实例并重建
+  (window as unknown as { __editorLightsNeedRebuild?: boolean }).__editorLightsNeedRebuild = true;
 }

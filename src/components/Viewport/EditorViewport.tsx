@@ -1507,6 +1507,16 @@ export function EditorViewport() {
   useEffect(() => {
     if (!sceneRef.current) return;
 
+    // 打开/清空项目后强制重建灯光（避免 ref 握着已移出场景的旧实例）
+    if ((window as unknown as { __editorLightsNeedRebuild?: boolean }).__editorLightsNeedRebuild) {
+      lightsRef.current.forEach((light) => {
+        removeLightTargetFromScene(sceneRef.current!, light);
+        if (light.parent) light.parent.remove(light);
+      });
+      lightsRef.current.clear();
+      (window as unknown as { __editorLightsNeedRebuild?: boolean }).__editorLightsNeedRebuild = false;
+    }
+
     // 移除不在lightStore中的灯光
     lightsRef.current.forEach((light, id) => {
       if (!lights.find(l => l.id === id)) {
@@ -1519,6 +1529,19 @@ export function EditorViewport() {
     // 创建或更新灯光
     lights.forEach((lightConfig) => {
       let light = lightsRef.current.get(lightConfig.id);
+
+      // clearEditorScene 会 remove 场景灯光，但 lightsRef 仍可能握着旧实例。
+      // 旧实例已不在当前场景时必须丢弃并重建，否则 MeshStandardMaterial 无光全黑（像材质丢失）。
+      if (light && light.parent !== sceneRef.current) {
+        try {
+          removeLightTargetFromScene(sceneRef.current!, light);
+          if (light.parent) light.parent.remove(light);
+        } catch {
+          // ignore
+        }
+        lightsRef.current.delete(lightConfig.id);
+        light = undefined as unknown as THREE.Light;
+      }
 
       // 如果灯光不存在,创建新灯光
       if (!light) {
