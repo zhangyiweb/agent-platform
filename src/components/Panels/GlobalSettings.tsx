@@ -590,6 +590,18 @@ export function GlobalSettings() {
         setBgColor(color);
         bgColorRef.current = color;
       }
+      // 纯色背景：按恢复后的颜色写回场景（避免仍停留在旧灰底）
+      if (scene && !bgHdriEnabledRef.current) {
+        const color = String(
+          saved.bgColor ??
+            (scene.background instanceof THREE.Color
+              ? `#${scene.background.getHexString()}`
+              : '#000000')
+        );
+        scene.background = new THREE.Color(color);
+        bgColorRef.current = color;
+        setBgColor(color);
+      }
       if (saved.fogEnabled != null) setFogEnabled(Boolean(saved.fogEnabled));
       if (saved.fogColor) setFogColor(String(saved.fogColor));
       if (saved.fogNear != null) setFogNear(Number(saved.fogNear));

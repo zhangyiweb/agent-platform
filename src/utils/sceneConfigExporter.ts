@@ -273,13 +273,30 @@ export function generateSceneConfig(): ExportedSceneConfig {
     };
   }
 
-  const fogFromScene = scene.fog;
-  const fog = globalSettings
+  // settings.bgColor 可能与场景真实背景不一致（面板默认 #1a1a1a，视口初始化为黑），以场景为准
+  const settingsForExport: Record<string, unknown> | null = globalSettings
     ? {
-        enabled: Boolean(globalSettings.fogEnabled),
-        color: String(globalSettings.fogColor ?? '#ffffff'),
-        near: Number(globalSettings.fogNear ?? 1),
-        far: Number(globalSettings.fogFar ?? 100),
+        ...globalSettings,
+        ...(scene.background instanceof THREE.Color
+          ? { bgColor: `#${scene.background.getHexString()}` }
+          : {}),
+        hasHDRBackground: scene.background instanceof THREE.Texture,
+        bgHdriEnabled:
+          scene.background instanceof THREE.Texture
+            ? Boolean(globalSettings.bgHdriEnabled ?? globalSettings.hasHDRBackground ?? true)
+            : false,
+      }
+    : scene.background instanceof THREE.Color
+      ? { bgColor: `#${scene.background.getHexString()}` }
+      : null;
+
+  const fogFromScene = scene.fog;
+  const fog = settingsForExport
+    ? {
+        enabled: Boolean(settingsForExport.fogEnabled),
+        color: String(settingsForExport.fogColor ?? '#ffffff'),
+        near: Number(settingsForExport.fogNear ?? 1),
+        far: Number(settingsForExport.fogFar ?? 100),
       }
     : fogFromScene instanceof THREE.Fog
       ? {
@@ -291,7 +308,7 @@ export function generateSceneConfig(): ExportedSceneConfig {
       : null;
 
   const toneMappingName =
-    (globalSettings?.toneMapping as string) ||
+    (settingsForExport?.toneMapping as string) ||
     TONE_MAPPING_NAME_BY_VALUE[renderer?.toneMapping ?? THREE.ACESFilmicToneMapping] ||
     'aces';
 
@@ -304,20 +321,20 @@ export function generateSceneConfig(): ExportedSceneConfig {
       textureUvAnimations,
       ...(Object.keys(particles).length > 0 ? { particles } : {}),
       ...(cameraTours.length > 0 ? { cameraTours, activeCameraTourId } : {}),
-      settings: globalSettings,
+      settings: settingsForExport,
     },
     scene: {
       background,
       fog,
       environment: {
         enabled: Boolean(
-          scene.environment && globalSettings?.envHdriEnabled !== false
+          scene.environment && settingsForExport?.envHdriEnabled !== false
         ),
-        name: globalSettings?.hdrEnvName ? String(globalSettings.hdrEnvName) : undefined,
-        intensity: globalSettings?.envMapIntensity != null
-          ? Number(globalSettings.envMapIntensity)
+        name: settingsForExport?.hdrEnvName ? String(settingsForExport.hdrEnvName) : undefined,
+        intensity: settingsForExport?.envMapIntensity != null
+          ? Number(settingsForExport.envMapIntensity)
           : undefined,
-        rotationY: Number(globalSettings?.hdrRotationY ?? 0),
+        rotationY: Number(settingsForExport?.hdrRotationY ?? 0),
       },
     },
     camera: camera

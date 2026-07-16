@@ -159,7 +159,12 @@ function applyRendererAndSceneSettings(config: ProjectConfig) {
   } | undefined;
 
   const settings = (config.editor.settings ?? {}) as Record<string, unknown>;
-  const bgColor = String(settings.bgColor ?? '#1a1a1a');
+  // 优先用场景真实背景色，避免面板默认灰 #1a1a1a 覆盖视口黑色
+  const bgFromScene =
+    config.scene?.background?.type === 'color' && config.scene.background.value
+      ? String(config.scene.background.value)
+      : null;
+  const bgColor = String(bgFromScene ?? settings.bgColor ?? '#000000');
 
   if (scene) {
     if (config.scene?.fog?.enabled) {
@@ -172,8 +177,10 @@ function applyRendererAndSceneSettings(config: ProjectConfig) {
       scene.fog = null;
     }
 
-    if (!settings.hasHDRBackground && !settings.bgHdriEnabled) {
+    const useHdrBg = Boolean(settings.hasHDRBackground || settings.bgHdriEnabled);
+    if (!useHdrBg) {
       scene.background = new THREE.Color(bgColor);
+      useSceneStore.setState({ backgroundColor: bgColor });
     }
   }
 
@@ -228,6 +235,7 @@ function applyRendererAndSceneSettings(config: ProjectConfig) {
 
   const mergedSettings = {
     ...settings,
+    bgColor,
     postProcess: config.postProcess ?? undefined,
     postProcessEnabled: config.postProcess?.enabled ?? false,
     selectedEffect: config.postProcess?.effect ?? 'none',
