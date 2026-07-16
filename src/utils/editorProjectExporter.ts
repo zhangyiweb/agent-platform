@@ -13,12 +13,16 @@ import {
   getTextureZipFiles,
   inlineDownloadedTextures,
   packTextureAssetsForZip,
+  prepareTexturesForGlbExport,
   type ExportedTextureAssetEntry,
   type PolyhavenModelSource,
 } from '@/utils/exportExternalAssets';
 import { fetchHdriUrl, type HdrDownloadSource, type HdrResolution } from '@/utils/polyhaven';
 import { getExportableTours, buildCameraTourJson } from '@/utils/cameraTourJson';
 import { useTourStore } from '@/store/tourStore';
+import { useUIEditorStore } from '@/store/uiEditorStore';
+import { packUiPagesForZip } from '@/utils/uiPageZipAssets';
+import { ZIP_GENERATE_OPTIONS } from '@/utils/zipExport';
 import type { CameraTour } from '@/types/cameraTour';
 
 export const EDITOR_PROJECT_FORMAT = 'editor-project';
@@ -33,6 +37,7 @@ async function exportGlbBuffer(
   normalizeObjectTextureUvs(exportScene);
   stampModelUserDataForExport(exportScene);
   await inlineDownloadedTextures(exportScene, downloadedTextures);
+  await prepareTexturesForGlbExport(exportScene);
 
   return new Promise((resolve, reject) => {
     const exporter = new GLTFExporter();
@@ -46,7 +51,7 @@ async function exportGlbBuffer(
         reject(new Error('GLB 导出失败：未生成二进制数据'));
       },
       (error) => reject(error instanceof Error ? error : new Error(String(error))),
-      { binary: true, trs: true, onlyVisible: true, embedImages: true }
+      { binary: true, trs: true, onlyVisible: false, embedImages: true }
     );
   });
 }
@@ -111,15 +116,22 @@ function writeCameraTourFiles(
   });
 }
 
-/** 保存可重新导入的编辑器项目包（ZIP） */
-export async function saveEditorProject(): Promise<{ filename: string }> {
+/** 保存可重新导入的完整编辑器项目包（场景 + UI 画布，ZIP） */
+export async function saveEditorProject(): Promise<{
+  filename: string;
+  pageCount: number;
+  pageNames: string[];
+  imageCount: number;
+  hasModel: boolean;
+  hasSceneObjects: boolean;
+}> {
   const scene = (window as any).__editorScene as THREE.Scene | undefined;
   if (!scene) {
     throw new Error('场景尚未初始化，请等待编辑器加载完成后再保存');
   }
 
   const timestamp = Date.now();
-  const folderName = `digital-twin-editor-${timestamp}`;
+  const folderName = `digital-twin-project-${timestamp}`;
   const zip = new JSZip();
   const root = zip.folder(folderName);
   if (!root) {
@@ -147,11 +159,13 @@ export async function saveEditorProject(): Promise<{ filename: string }> {
     assets.textures = textureEntries;
   }
 
+  let hasModel = false;
   try {
     const glbBuffer = await exportGlbBuffer(scene, downloadedTextures);
     if (glbBuffer.byteLength > 0) {
       root.file('assets/models/scene.glb', glbBuffer);
       assets.model = 'assets/models/scene.glb';
+      hasModel = true;
     }
   } catch (error) {
     console.warn('模型 GLB 保存失败，项目将仅包含配置', error);
@@ -172,6 +186,13 @@ export async function saveEditorProject(): Promise<{ filename: string }> {
   const { tours, activeTourId } = useTourStore.getState();
   writeCameraTourFiles(root, tours, activeTourId);
 
+  // 始终嵌入全部 UI 画布（与场景一体保存）
+  useUIEditorStore.getState().flushActivePage();
+  const uiState = useUIEditorStore.getState();
+  const uiPagesSnap = uiState.getPagesSnapshot();
+  const packed = packUiPagesForZip(uiPagesSnap, 'assets/ui-pages');
+  packed.files.forEach(({ path, data }) => root.file(path, data));
+
   const projectConfig: ExportedSceneConfig & {
     format: string;
     assets?: typeof assets;
@@ -189,13 +210,36 @@ export async function saveEditorProject(): Promise<{ filename: string }> {
       textureUvStates,
       ...(polyhavenModels.length > 0 ? { polyhavenModels } : {}),
       ...(tours.length > 0 ? { cameraTours: tours, activeCameraTourId: activeTourId } : {}),
+      uiPages: packed.pages,
+      previewPageId: uiState.previewPageId,
+      activePageId: uiState.activePageId,
     },
   };
 
   root.file('config/scene.json', JSON.stringify(projectConfig, null, 2));
+  root.file(
+    'README.md',
+    `# 数字孪生完整项目包
 
-  const blob = await zip.generateAsync({ type: 'blob' });
+保存时间：${baseConfig.exportTime}
+
+本压缩包同时包含：
+- 3D 场景（模型、灯光、标签、粒子、漫游等）
+- UI 编排画布（\`editor.uiPages\`）
+
+可用「场景编辑」或「UI 编排」中的「打开项目」载入。
+`
+  );
+
+  const blob = await zip.generateAsync(ZIP_GENERATE_OPTIONS);
   const filename = `${folderName}.zip`;
   downloadBlob(blob, filename);
-  return { filename };
+  return {
+    filename,
+    pageCount: packed.pages.length,
+    pageNames: packed.pages.map((p) => p.name),
+    imageCount: packed.imageCount,
+    hasModel,
+    hasSceneObjects: (baseConfig.editor.objects?.length ?? 0) > 0,
+  };
 }

@@ -59,6 +59,7 @@ export function buildUIBridgeJs(bindings: UIBindingExportEntry[]): string {
   'use strict';
 
   var bindings = ${JSON.stringify(bindings, null, 2)};
+  var bound = false;
 
   function runActions(actions) {
     var api = window.sceneApi;
@@ -76,7 +77,20 @@ export function buildUIBridgeJs(bindings: UIBindingExportEntry[]): string {
     uiActions.forEach(function (action) { api.dispatch(action); });
   }
 
+  function findBindingForTarget(target) {
+    if (!target || !target.closest) return null;
+    for (var i = 0; i < bindings.length; i += 1) {
+      var entry = bindings[i];
+      var el = document.getElementById(entry.domId);
+      if (el && (el === target || el.contains(target))) return entry;
+    }
+    return null;
+  }
+
   function bindAll() {
+    if (bound) return;
+    bound = true;
+
     bindings.forEach(function (entry) {
       var el = document.getElementById(entry.domId);
       if (!el) {
@@ -84,24 +98,36 @@ export function buildUIBridgeJs(bindings: UIBindingExportEntry[]): string {
         return;
       }
       el.classList.add('ui-interactive');
-
-      var byTrigger = {};
-      (entry.actions || []).forEach(function (action) {
-        var trigger = action.trigger || 'click';
-        if (!byTrigger[trigger]) byTrigger[trigger] = [];
-        byTrigger[trigger].push(action);
-      });
-
-      Object.keys(byTrigger).forEach(function (trigger) {
-        el.addEventListener(trigger, function (ev) {
-          if (trigger === 'click' || trigger === 'dblclick') {
-            ev.preventDefault();
-          }
-          ev.stopPropagation();
-          runActions(byTrigger[trigger]);
-        });
-      });
     });
+
+    var overlay = document.getElementById('ui-overlay');
+    var root = overlay || document;
+
+    // 事件委托：避免子节点样式导致直接绑定失效，也避免重复绑定
+    root.addEventListener('click', function (ev) {
+      var entry = findBindingForTarget(ev.target);
+      if (!entry) return;
+      var actions = (entry.actions || []).filter(function (a) {
+        return !a.trigger || a.trigger === 'click';
+      });
+      if (!actions.length) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      runActions(actions);
+    }, true);
+
+    root.addEventListener('dblclick', function (ev) {
+      var entry = findBindingForTarget(ev.target);
+      if (!entry) return;
+      var actions = (entry.actions || []).filter(function (a) {
+        return a.trigger === 'dblclick';
+      });
+      if (!actions.length) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      runActions(actions);
+    }, true);
+
     console.info('[ui-bridge] 已绑定', bindings.length, '个交互元素');
   }
 
@@ -111,7 +137,6 @@ export function buildUIBridgeJs(bindings: UIBindingExportEntry[]): string {
       return;
     }
     window.addEventListener('dt-scene-ready', bindAll, { once: true });
-    // 兜底：场景较慢时轮询
     var tries = 0;
     var timer = setInterval(function () {
       tries += 1;
@@ -252,11 +277,21 @@ export function buildUIOverlayExtraCss(): string {
   overflow: hidden;
 }
 
+/* 交互元素及其子孙必须可点；否则子节点 pointer-events:none 会点穿到 canvas */
+#ui-overlay .ui-interactive,
+#ui-overlay .ui-interactive *,
+#ui-overlay button.ui-el,
+#ui-overlay button.ui-el *,
+#ui-overlay input.ui-el-native-input,
+#ui-overlay .ui-el-button,
+#ui-overlay .ui-el-button * {
+  pointer-events: auto !important;
+}
+
 #ui-overlay .ui-interactive,
 #ui-overlay button.ui-el,
-#ui-overlay input.ui-el-native-input,
 #ui-overlay .ui-el-button {
-  pointer-events: auto;
+  cursor: pointer;
 }
 `;
 }

@@ -22,6 +22,9 @@ import { useSceneStore } from '@/store/sceneStore';
 import { useLightStore } from '@/store/lightStore';
 import { useAnimationStore } from '@/store/animationStore';
 import { useTourStore } from '@/store/tourStore';
+import { useUIEditorStore } from '@/store/uiEditorStore';
+import { resolveUiPagesFromZip } from '@/utils/uiPageZipAssets';
+import type { UIPage } from '@/types/uiEditor';
 import { applyHdrRotationY as applySceneHdrRotationY } from '@/utils/hdrRotation';
 
 export const EDITOR_PROJECT_RESTORE_EVENT = 'editor:project-restored';
@@ -39,6 +42,9 @@ type ProjectConfig = ExportedSceneConfig & {
     activeCameraTourId?: string | null;
     textureUvAnimations?: Record<string, TextureUvAnimationConfig>;
     particles?: Record<string, ParticleEmitterConfig>;
+    uiPages?: UIPage[];
+    previewPageId?: string;
+    activePageId?: string;
   };
 };
 
@@ -345,6 +351,25 @@ async function restoreProjectConfig(
     restoreParticleEmitters(scene, particles, particleObjects);
   }
 
+  // 先恢复 UI 画布，再创建标签，避免 uiPage 标签找不到页面
+  const rawUiPages = config.editor.uiPages;
+  if (rawUiPages && rawUiPages.length > 0) {
+    const pages =
+      zip != null
+        ? await resolveUiPagesFromZip(zip, rootPrefix, rawUiPages)
+        : rawUiPages;
+    useUIEditorStore.getState().loadProject({
+      pages,
+      previewPageId: config.editor.previewPageId,
+      activePageId: config.editor.activePageId ?? pages[0]?.id,
+    });
+  } else if (config.editor.previewPageId) {
+    const store = useUIEditorStore.getState();
+    if (store.pages.some((p) => p.id === config.editor.previewPageId)) {
+      useUIEditorStore.setState({ previewPageId: config.editor.previewPageId! });
+    }
+  }
+
   const labelObjects = editorObjects.filter((o) => o.type === 'label');
   if (labelObjects.length > 0) {
     const { addObject, registerThreeObject } = useSceneStore.getState();
@@ -390,26 +415,84 @@ function parseProjectConfig(raw: unknown): ProjectConfig {
   return config;
 }
 
-/** 从 ZIP 项目包导入（编辑器保存包或导出的完整项目包均可） */
-export async function importEditorProjectZip(file: File): Promise<void> {
+/** 统一打开：完整场景+UI 包，或兼容旧版仅 UI 包 */
+export async function importUnifiedProjectZip(file: File): Promise<{
+  pageCount: number;
+  pageNames: string[];
+  elementCount: number;
+  objectCount: number;
+  legacyUiOnly: boolean;
+}> {
   const zip = await JSZip.loadAsync(file);
+  const paths = Object.keys(zip.files);
   const sceneJsonPath = findSceneJsonPath(zip);
-  if (!sceneJsonPath) {
-    throw new Error('ZIP 中未找到 config/scene.json');
+  const hasUiJson = paths.some(
+    (p) => p.endsWith('config/ui-editor.json') || /(^|\/)ui-editor\.json$/i.test(p)
+  );
+
+  if (sceneJsonPath) {
+    const jsonText = await zip.file(sceneJsonPath)!.async('text');
+    const config = parseProjectConfig(JSON.parse(jsonText));
+    const rootPrefix = getZipRootPrefix(sceneJsonPath);
+    await restoreProjectConfig(config, zip, rootPrefix);
+
+    const ui = useUIEditorStore.getState();
+    return {
+      pageCount: ui.pages.length,
+      pageNames: ui.pages.map((p) => p.name || '未命名'),
+      elementCount: ui.pages.reduce((sum, p) => sum + (p.elements?.length ?? 0), 0),
+      objectCount: useSceneStore.getState().objects.length,
+      legacyUiOnly: false,
+    };
   }
 
-  const jsonText = await zip.file(sceneJsonPath)!.async('text');
-  const config = parseProjectConfig(JSON.parse(jsonText));
-  const rootPrefix = getZipRootPrefix(sceneJsonPath);
+  if (hasUiJson) {
+    const { importUIEditorProjectZip } = await import('@/utils/uiEditorProjectImporter');
+    const uiResult = await importUIEditorProjectZip(file);
+    return {
+      ...uiResult,
+      objectCount: 0,
+      legacyUiOnly: true,
+    };
+  }
 
-  await restoreProjectConfig(config, zip, rootPrefix);
+  throw new Error('无法识别的项目包（需要包含 config/scene.json）');
+}
+
+/** @deprecated 请使用 importUnifiedProjectZip；保留兼容旧调用 */
+export async function importEditorProjectZip(file: File) {
+  const result = await importUnifiedProjectZip(file);
+  if (result.legacyUiOnly) {
+    throw new Error('ZIP 中未找到 config/scene.json');
+  }
+  const { legacyUiOnly: _legacy, ...rest } = result;
+  return rest;
 }
 
 /** 从独立 scene-config JSON 导入（仅恢复配置，不含模型） */
-export async function importEditorProjectJson(file: File): Promise<void> {
+export async function importEditorProjectJson(file: File): Promise<{
+  pageCount: number;
+  pageNames: string[];
+  elementCount: number;
+  objectCount: number;
+}> {
   const text = await file.text();
   const config = parseProjectConfig(JSON.parse(text));
   await restoreProjectConfig(config, null, '');
+
+  const ui = useUIEditorStore.getState();
+  return {
+    pageCount: ui.pages.length,
+    pageNames: ui.pages.map((p) => p.name || '未命名'),
+    elementCount: ui.pages.reduce((sum, p) => sum + (p.elements?.length ?? 0), 0),
+    objectCount: useSceneStore.getState().objects.length,
+  };
+}
+
+/** 当前是否有场景或 UI 内容（打开项目前提示用） */
+export function hasProjectContent(): boolean {
+  if (hasEditorSceneContent()) return true;
+  return useUIEditorStore.getState().hasContent();
 }
 
 /** 当前场景是否已有可保存的内容 */

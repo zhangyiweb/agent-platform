@@ -98,6 +98,7 @@ export function createModelsExportScene(source: THREE.Scene): THREE.Scene {
     if (child instanceof THREE.Light) return;
     if (child.userData?.isLightTarget) return;
     if (child.userData?.isParticleEmitter) return;
+    if (child.userData?.type === 'label') return;
     if (
       child instanceof THREE.Mesh ||
       child instanceof THREE.Group ||
@@ -118,6 +119,7 @@ export function createExportScene(source: THREE.Scene): THREE.Scene {
   source.children.forEach((child) => {
     if (isEditorHelperObject(child)) return;
     if (child.userData?.isParticleEmitter) return;
+    if (child.userData?.type === 'label') return;
     if (child instanceof THREE.Light) {
       exportScene.add(child.clone());
       return;

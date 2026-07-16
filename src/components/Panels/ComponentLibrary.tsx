@@ -289,10 +289,12 @@ export function ComponentLibrary() {
                   key={value}
                   type="button"
                   onClick={() => handleAddLabel(value)}
-                  className={`${itemButtonClass} text-left !py-2`}
+                  className={`${itemButtonClass} text-left h-[64px] px-3 py-2 flex flex-col justify-center`}
                 >
-                  <div className="text-xs font-medium text-white">{label}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5 leading-snug">{desc}</div>
+                  <div className="text-xs font-medium text-white leading-tight">{label}</div>
+                  <div className="text-[10px] text-gray-500 mt-1 leading-snug line-clamp-2">
+                    {desc}
+                  </div>
                 </button>
               ))}
             </div>

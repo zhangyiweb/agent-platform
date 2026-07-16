@@ -36,23 +36,27 @@ export interface PolyhavenModelSource {
   resolution: string;
 }
 
-export function isExternalHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
-
 export function getTextureSourceUrl(tex: THREE.Texture): string | null {
   const fromUserData = tex.userData?.sourceUrl;
-  if (typeof fromUserData === 'string' && isExternalHttpUrl(fromUserData)) {
+  if (typeof fromUserData === 'string' && isFetchableTextureUrl(fromUserData)) {
     return fromUserData;
   }
 
   const img = tex.image;
   if (img instanceof HTMLImageElement) {
     const src = img.currentSrc || img.src;
-    if (src && isExternalHttpUrl(src)) return src;
+    if (src && isFetchableTextureUrl(src)) return src;
   }
 
   return null;
+}
+
+export function isFetchableTextureUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url) || /^blob:/i.test(url);
+}
+
+export function isExternalHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
 }
 
 export function tagPolyhavenTexture(
@@ -223,6 +227,75 @@ export function deepCloneSceneMaterials(root: THREE.Object3D) {
       child.material = cloneMaterialTextures(child.material);
     }
   });
+}
+
+/**
+ * GLTFExporter 对 ImageBitmap 嵌入不稳定，导出前转为 Canvas，避免打开项目后材质贴图丢失。
+ */
+export async function prepareTexturesForGlbExport(root: THREE.Object3D): Promise<void> {
+  const tasks: Promise<void>[] = [];
+
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((mat) => {
+      if (!mat) return;
+      MATERIAL_TEXTURE_KEYS.forEach((key) => {
+        const tex = (mat as unknown as Record<string, THREE.Texture | undefined>)[key];
+        if (!tex?.image) return;
+        tasks.push(ensureExportableTextureImage(tex));
+      });
+    });
+  });
+
+  await Promise.all(tasks);
+}
+
+async function ensureExportableTextureImage(tex: THREE.Texture): Promise<void> {
+  const img = tex.image as
+    | HTMLImageElement
+    | HTMLCanvasElement
+    | ImageBitmap
+    | OffscreenCanvas
+    | null
+    | undefined;
+  if (!img) return;
+
+  if (img instanceof HTMLCanvasElement) {
+    tex.needsUpdate = true;
+    return;
+  }
+
+  if (img instanceof HTMLImageElement) {
+    if (!img.complete) {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+      });
+    }
+    tex.needsUpdate = true;
+    return;
+  }
+
+  const width =
+    'width' in img && typeof img.width === 'number' ? img.width : 0;
+  const height =
+    'height' in img && typeof img.height === 'number' ? img.height : 0;
+  if (!width || !height) return;
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img as CanvasImageSource, 0, 0);
+    tex.image = canvas;
+    tex.needsUpdate = true;
+  } catch (error) {
+    console.warn('贴图转为 Canvas 失败，GLB 可能丢失该贴图', error);
+  }
 }
 
 /** 将已下载的贴图写入导出场景副本，供 GLTFExporter embedImages 嵌入 GLB */

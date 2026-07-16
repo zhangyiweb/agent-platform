@@ -7,6 +7,8 @@ import { useTourStore } from '@/store/tourStore';
 import type { CameraTour } from '@/types/cameraTour';
 import type { ExportedTextureUvState } from '@/utils/exportSceneRestore';
 import type { ParticleEmitterConfig } from '@/types/particle';
+import type { UIPage } from '@/types/uiEditor';
+import type { ExportedLabelPagePack } from '@/utils/exportLabelAssets';
 import { syncSceneObjectsToStore } from '@/utils/sceneUtils';
 
 const TONE_MAPPING_BY_NAME: Record<string, number> = {
@@ -34,6 +36,14 @@ export interface ExportedSceneConfig {
     cameraTours?: CameraTour[];
     activeCameraTourId?: string | null;
     textureUvStates?: Record<string, ExportedTextureUvState>;
+    /** 场景项目包：嵌入的 UI 编排画布（打开时恢复） */
+    uiPages?: UIPage[];
+    /** 联动预览显示的画布 id */
+    previewPageId?: string;
+    /** 打开时恢复的当前编辑画布 id */
+    activePageId?: string;
+    /** 部署包：标签引用的 UI 页预渲染 HTML */
+    labelPages?: Record<string, ExportedLabelPagePack>;
     settings: Record<string, unknown> | null;
   };
   scene: {

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Modal } from 'antd';
+import { App } from 'antd';
 import { useEditorNotify } from '@/hooks/useEditorNotify';
 import { useEditorStore } from '@/store/editorStore';
 import { useModelLoader } from '@/hooks/useModelLoader';
@@ -8,12 +8,12 @@ import { ModelPickerModal } from '@/components/Panels/ModelPickerModal';
 import { UIExportModal } from '@/components/UIEditor/UIExportModal';
 import { saveEditorProject } from '@/utils/editorProjectExporter';
 import {
-  hasEditorSceneContent,
+  hasProjectContent,
   importEditorProjectJson,
-  importEditorProjectZip,
+  importUnifiedProjectZip,
 } from '@/utils/editorProjectImporter';
-import { saveUIEditorProject } from '@/utils/uiEditorProjectExporter';
-import { importUIEditorProjectJson, importUIEditorProjectZip } from '@/utils/uiEditorProjectImporter';
+import { importUIEditorProjectJson } from '@/utils/uiEditorProjectImporter';
+import { UI_EDITOR_PROJECT_FORMAT } from '@/utils/uiEditorProjectExporter';
 import {
   DEFAULT_MODEL_RESOLUTION,
   type ModelAsset,
@@ -23,6 +23,7 @@ import { useUIEditorStore } from '@/store/uiEditorStore';
 
 export function Toolbar() {
   const notify = useEditorNotify();
+  const { modal } = App.useApp();
   const { editorMode, setEditorMode } = useEditorStore();
   const [showExport, setShowExport] = useState(false);
   const [showUIExport, setShowUIExport] = useState(false);
@@ -86,6 +87,7 @@ export function Toolbar() {
       const detail = [
         result.hasUIOverlay ? '含 UI 叠层' : null,
         result.uiBindingCount > 0 ? `${result.uiBindingCount} 个交互` : null,
+        result.hasLabels ? `${result.labelCount} 个标签` : null,
         result.hasModel ? '含模型' : null,
         result.hasCameraTour ? '含漫游' : null,
       ]
@@ -107,21 +109,19 @@ export function Toolbar() {
   const handleSaveProject = async () => {
     setSavingProject(true);
     try {
-      if (editorMode === 'ui') {
-        const result = await saveUIEditorProject();
-        const names =
-          result.pageNames.length <= 3
-            ? result.pageNames.join('、')
-            : `${result.pageNames.slice(0, 3).join('、')} 等`;
-        const parts = [
-          `${result.pageCount} 个画布（${names}）`,
-          result.imageCount > 0 ? `${result.imageCount} 张图片` : null,
-        ].filter(Boolean);
-        notify.success(`UI 项目已保存：${result.filename}（${parts.join('，')}）`);
-      } else {
-        const result = await saveEditorProject();
-        notify.success(`项目已保存：${result.filename}`);
-      }
+      const result = await saveEditorProject();
+      const names =
+        result.pageNames.length <= 3
+          ? result.pageNames.join('、')
+          : `${result.pageNames.slice(0, 3).join('、')} 等`;
+      const detail = [
+        result.hasSceneObjects || result.hasModel ? '含场景' : null,
+        `${result.pageCount} 个 UI 画布（${names}）`,
+        result.imageCount > 0 ? `${result.imageCount} 张图片` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      notify.success(`项目已保存：${result.filename}${detail ? `（${detail}）` : ''}`);
     } catch (error) {
       console.error(error);
       notify.error(error instanceof Error ? error.message : '项目保存失败');
@@ -138,31 +138,43 @@ export function Toolbar() {
     setOpeningProject(true);
     try {
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (editorMode === 'ui') {
-        let result;
-        if (ext === 'zip') {
-          result = await importUIEditorProjectZip(file);
-        } else if (ext === 'json') {
-          result = await importUIEditorProjectJson(file);
+      let result: {
+        pageCount: number;
+        pageNames: string[];
+        elementCount: number;
+        objectCount?: number;
+        legacyUiOnly?: boolean;
+      };
+
+      if (ext === 'zip') {
+        result = await importUnifiedProjectZip(file);
+      } else if (ext === 'json') {
+        const text = await file.text();
+        const raw = JSON.parse(text) as { format?: string; editor?: unknown };
+        if (raw.format === UI_EDITOR_PROJECT_FORMAT) {
+          const uiResult = await importUIEditorProjectJson(file);
+          result = { ...uiResult, objectCount: 0, legacyUiOnly: true };
+        } else if (raw.editor) {
+          result = await importEditorProjectJson(file);
         } else {
-          throw new Error('仅支持 .zip UI 项目包或 .json UI 配置');
+          throw new Error('无法识别的 JSON 配置');
         }
-        const names =
-          result.pageNames.length <= 3
-            ? result.pageNames.join('、')
-            : `${result.pageNames.slice(0, 3).join('、')} 等`;
+      } else {
+        throw new Error('仅支持 .zip 项目包或 .json 配置');
+      }
+
+      const names =
+        result.pageNames.length <= 3
+          ? result.pageNames.join('、')
+          : `${result.pageNames.slice(0, 3).join('、')} 等`;
+      if (result.legacyUiOnly) {
         notify.success(
-          `UI 项目已打开：${file.name}（${result.pageCount} 个画布：${names}，共 ${result.elementCount} 个元素）`
+          `已打开旧版 UI 项目：${file.name}（${result.pageCount} 个画布：${names}）。建议重新「保存项目」以合并场景。`
         );
       } else {
-        if (ext === 'zip') {
-          await importEditorProjectZip(file);
-        } else if (ext === 'json') {
-          await importEditorProjectJson(file);
-        } else {
-          throw new Error('仅支持 .zip 项目包或 .json 场景配置');
-        }
-        notify.success(`项目已打开：${file.name}`);
+        notify.success(
+          `项目已打开：${file.name}（场景对象 ${result.objectCount ?? 0} · UI ${result.pageCount} 画布：${names}）`
+        );
       }
     } catch (error) {
       console.error(error);
@@ -183,29 +195,22 @@ export function Toolbar() {
       }
     };
 
-    const hasUnsavedContent =
-      editorMode === 'ui' ? useUIEditorStore.getState().hasContent() : hasEditorSceneContent();
-
-    if (hasUnsavedContent) {
-      const pageCount = editorMode === 'ui' ? useUIEditorStore.getState().pages.length : 0;
-      Modal.confirm({
+    if (hasProjectContent()) {
+      const pageCount = useUIEditorStore.getState().pages.length;
+      modal.confirm({
         title: '打开项目',
-        content:
-          editorMode === 'ui'
-            ? `当前有 ${pageCount} 个画布尚未保存，打开项目将覆盖全部画布内容。是否继续？`
-            : '当前场景尚未保存，打开项目将覆盖现有内容。是否继续？',
+        content: `将同时覆盖当前场景与全部 UI 画布（当前 ${pageCount} 个画布）。是否继续？`,
         okText: '继续打开',
         cancelText: '取消',
         onOk: openFile,
         onCancel: () => {
-          if (projectInputRef.current) {
-            projectInputRef.current.value = '';
-          }
+          if (projectInputRef.current) projectInputRef.current.value = '';
         },
       });
-    } else {
-      await openFile();
+      return;
     }
+
+    await openFile();
   };
 
   return (
@@ -235,8 +240,7 @@ export function Toolbar() {
               className={`editor-mode-btn ${editorMode === 'scene' ? 'active' : ''}`}
               onClick={() => {
                 // 切回场景前把当前 UI 页写回 pages，保证标签绑定下拉同步
-                const snap = useUIEditorStore.getState().getPagesSnapshot();
-                useUIEditorStore.setState({ pages: snap });
+                useUIEditorStore.getState().flushActivePage();
                 setEditorMode('scene');
               }}
             >
@@ -292,12 +296,14 @@ export function Toolbar() {
             className="hidden"
           />
 
-          {editorMode === 'ui' ? (
+          {(editorMode === 'ui' || editorMode === 'scene') && (
             <>
               <button
+                type="button"
                 onClick={handleOpenProjectClick}
                 disabled={openingProject}
                 className="toolbar-btn btn-import"
+                title="打开完整项目（场景 + UI）"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                   <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
@@ -307,9 +313,11 @@ export function Toolbar() {
               </button>
 
               <button
+                type="button"
                 onClick={handleSaveProject}
                 disabled={savingProject}
                 className="toolbar-btn btn-import"
+                title="保存完整项目（场景 + UI）"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                   <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
@@ -318,19 +326,22 @@ export function Toolbar() {
                 </svg>
                 <span>{savingProject ? '保存中…' : '保存项目'}</span>
               </button>
-
-              <button
-                onClick={handleExportProject}
-                className="toolbar-btn btn-export"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 2H10L13 5V13C13 13.5523 12.5523 14 12 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2Z" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                </svg>
-                <span>导出界面</span>
-              </button>
             </>
+          )}
+
+          {editorMode === 'ui' ? (
+            <button
+              type="button"
+              onClick={handleExportProject}
+              className="toolbar-btn btn-export"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 2H10L13 5V13C13 13.5523 12.5523 14 12 14H3C2.44772 14 2 13.5523 2 13V3C2 2.44772 2.44772 2 3 2Z" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M5 8H9M5 10H8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              <span>导出界面</span>
+            </button>
           ) : editorMode === 'preview' ? (
             <button
               type="button"
@@ -348,31 +359,7 @@ export function Toolbar() {
           ) : (
             <>
               <button
-                onClick={handleOpenProjectClick}
-                disabled={openingProject}
-                className="toolbar-btn btn-import"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M2 4H14V12C14 12.5523 13.5523 13 13 13H3C2.44772 13 2 12.5523 2 12V4Z" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M5 7H11M5 10H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-                <span>{openingProject ? '打开中…' : '打开项目'}</span>
-              </button>
-
-              <button
-                onClick={handleSaveProject}
-                disabled={savingProject}
-                className="toolbar-btn btn-import"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 13H13V5L10 2H3V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                  <path d="M6 2V5H10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                  <path d="M5 9H11M5 11H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-                <span>{savingProject ? '保存中…' : '保存项目'}</span>
-              </button>
-
-              <button
+                type="button"
                 onClick={handleImport}
                 className="toolbar-btn btn-import"
               >
@@ -384,6 +371,7 @@ export function Toolbar() {
               </button>
 
               <button
+                type="button"
                 onClick={() => setModelModalOpen(true)}
                 disabled={!!loadingModelId}
                 className="toolbar-btn btn-import"
@@ -396,6 +384,7 @@ export function Toolbar() {
               </button>
 
               <button
+                type="button"
                 onClick={() => setShowExport(true)}
                 className="toolbar-btn btn-export"
               >

@@ -3,6 +3,7 @@ import type { UIElement, UIPage } from '@/types/uiEditor';
 import { parseDataUrl } from '@/utils/uiExportCore';
 import { useUIEditorStore } from '@/store/uiEditorStore';
 import { slugifyPageName } from '@/utils/uiProjectExporter';
+import { ZIP_GENERATE_OPTIONS } from '@/utils/zipExport';
 
 export const UI_EDITOR_PROJECT_FORMAT = 'ui-editor-project';
 export const UI_EDITOR_PROJECT_VERSION = '2.0.0';
@@ -160,7 +161,7 @@ export async function saveUIEditorProject(): Promise<UIEditorSaveResult> {
   root.file('config/ui-editor.json', JSON.stringify(projectFile, null, 2));
   root.file('README.md', buildSaveReadme(exportedPages, exportTime));
 
-  const blob = await zip.generateAsync({ type: 'blob' });
+  const blob = await zip.generateAsync(ZIP_GENERATE_OPTIONS);
   const filename = `${folderName}.zip`;
   downloadBlob(blob, filename);
 

@@ -197,6 +197,10 @@ interface UIEditorActions {
   duplicatePage: (pageId?: string) => string;
   /** 获取已 flush 的全部页面快照（导出/保存用） */
   getPagesSnapshot: () => UIPage[];
+  /** 仅获取一页快照（避免全量深拷贝，标签/预览用） */
+  getPageSnapshot: (pageId: string) => UIPage | null;
+  /** 把当前编辑态写回 pages（不切换页） */
+  flushActivePage: () => void;
   /** 载入 UI 项目（覆盖全部画布） */
   loadProject: (project: {
     pages?: UIPage[];
@@ -839,6 +843,7 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
   },
 
   getPagesSnapshot: () => {
+    // 纯内存合并，禁止在此 set()，否则会在组件渲染期触发「Cannot update a component while rendering」
     const state = get();
     return state.pages.map((p) =>
       p.id === state.activePageId
@@ -851,6 +856,30 @@ export const useUIEditorStore = create<UIEditorState & UIEditorActions>((set, ge
             elements: cloneElements(p.elements),
           }
     );
+  },
+
+  getPageSnapshot: (pageId) => {
+    const state = get();
+    if (pageId === state.activePageId) {
+      return {
+        ...pageFromActive(state),
+        elements: cloneElements(state.elements),
+      };
+    }
+    const page = state.pages.find((p) => p.id === pageId);
+    if (!page) return null;
+    return {
+      ...page,
+      elements: cloneElements(page.elements),
+    };
+  },
+
+  flushActivePage: () => {
+    set((state) => ({
+      pages: state.pages.map((p) =>
+        p.id === state.activePageId ? pageFromActive(state) : p
+      ),
+    }));
   },
 
   loadProject: (project) => {

@@ -389,6 +389,7 @@ export function ExportPanel({ onClose }: ExportPanelProps) {
             }${result.cameraTourCount > 1 ? ` 等${result.cameraTourCount}条` : ''})`
           : null,
         result.hasParticles ? `含 ${result.particleCount} 个粒子发射器` : null,
+        result.hasLabels ? `含 ${result.labelCount} 个场景标签` : null,
       ].filter(Boolean).join(' · ');
       notify.success(`场景运行包已导出（${detail}）`);
     } catch (error) {

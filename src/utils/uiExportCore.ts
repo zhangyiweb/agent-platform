@@ -27,6 +27,17 @@ function toVw(px: number, canvasWidth: number): string {
   return `${(px / canvasWidth) * 100}vw`;
 }
 
+function toPx(px: number): string {
+  return `${px}px`;
+}
+
+/** 全屏叠层用 vw；标签内嵌等固定设计稿用 px（与编辑器一致） */
+export type UIExportSizeUnit = 'vw' | 'px';
+
+function toLength(px: number, canvasWidth: number, unit: UIExportSizeUnit): string {
+  return unit === 'px' ? toPx(px) : toVw(px, canvasWidth);
+}
+
 /** 外链样式表中，修正所有相对 url()；prefix 默认为 ../（相对 css/ 目录） */
 function fixCssAssetPathsForExternalSheet(css: string, assetPrefix = '../'): string {
   const prefix = assetPrefix.endsWith('/') ? assetPrefix : `${assetPrefix}/`;
@@ -41,6 +52,7 @@ interface StyleContext {
   parentHeight: number;
   canvasWidth: number;
   canvasHeight: number;
+  sizeUnit: UIExportSizeUnit;
 }
 
 export interface UIExportContext {
@@ -68,7 +80,7 @@ function styleToCss(
   ctx: StyleContext,
   extra: Record<string, string | number> = {}
 ): string {
-  const { canvasWidth } = ctx;
+  const { canvasWidth, sizeUnit } = ctx;
   const rules: string[] = [];
 
   const add = (prop: string, value: string | number | undefined) => {
@@ -77,27 +89,36 @@ function styleToCss(
     }
   };
 
+  const len = (px: number) => toLength(px, canvasWidth, sizeUnit);
+
   add('background-color', style.backgroundColor);
   add('color', style.color);
-  if (style.fontSize !== undefined) add('font-size', toVw(style.fontSize, canvasWidth));
+  if (style.fontSize !== undefined) add('font-size', len(style.fontSize));
   add('font-weight', style.fontWeight);
   if (style.fontFamily && style.fontFamily !== 'inherit') add('font-family', style.fontFamily);
   add('text-align', style.textAlign);
   if (style.lineHeight !== undefined) {
     const lh = style.lineHeight;
-    add('line-height', typeof lh === 'number' && lh < 10 ? lh : typeof lh === 'number' ? toVw(lh, canvasWidth) : lh);
+    add('line-height', typeof lh === 'number' && lh < 10 ? lh : typeof lh === 'number' ? len(lh) : lh);
   }
-  if (style.letterSpacing !== undefined) add('letter-spacing', toVw(style.letterSpacing, canvasWidth));
-  if (style.borderRadius !== undefined) add('border-radius', toVw(style.borderRadius, canvasWidth));
+  if (style.letterSpacing !== undefined) add('letter-spacing', len(style.letterSpacing));
+  if (style.borderRadius !== undefined) add('border-radius', len(style.borderRadius));
   add('opacity', style.opacity);
   add('box-shadow', style.boxShadow);
   add('text-shadow', style.textShadow);
   add('overflow', style.overflow);
-  if (style.padding !== undefined) add('padding', toVw(style.padding, canvasWidth));
-  if (style.paddingTop !== undefined) add('padding-top', toVw(style.paddingTop, canvasWidth));
-  if (style.paddingRight !== undefined) add('padding-right', toVw(style.paddingRight, canvasWidth));
-  if (style.paddingBottom !== undefined) add('padding-bottom', toVw(style.paddingBottom, canvasWidth));
-  if (style.paddingLeft !== undefined) add('padding-left', toVw(style.paddingLeft, canvasWidth));
+  if (style.padding !== undefined) add('padding', len(style.padding));
+  if (style.paddingTop !== undefined) add('padding-top', len(style.paddingTop));
+  if (style.paddingRight !== undefined) add('padding-right', len(style.paddingRight));
+  if (style.paddingBottom !== undefined) add('padding-bottom', len(style.paddingBottom));
+  if (style.paddingLeft !== undefined) add('padding-left', len(style.paddingLeft));
+  if (style.margin !== undefined) add('margin', len(style.margin));
+  if (style.gap !== undefined) add('gap', len(style.gap));
+  add('flex-direction', style.flexDirection);
+  add('justify-content', style.justifyContent);
+  add('align-items', style.alignItems);
+  add('backdrop-filter', style.backdropFilter);
+  add('cursor', style.cursor);
   add('transition', 'all 0.2s ease');
 
   if (style.backgroundImage) {
@@ -115,7 +136,7 @@ function styleToCss(
   if (style.borderWidth && style.borderStyle !== 'none') {
     add(
       'border',
-      `${toVw(style.borderWidth, canvasWidth)} ${style.borderStyle || 'solid'} ${style.borderColor || '#404040'}`
+      `${len(style.borderWidth)} ${style.borderStyle || 'solid'} ${style.borderColor || '#404040'}`
     );
   }
 
@@ -125,26 +146,61 @@ function styleToCss(
 
 function getFlexLayout(el: UIElement): Record<string, string> {
   const { style } = el;
-  const isTextLike = el.type === 'text' || el.type === 'button';
+  const isTextLike = el.type === 'text' || el.type === 'button' || el.type === 'input';
+  const isBlockHost =
+    el.type === 'container' || el.type === 'rect' || el.type === 'echart' || el.type === 'image';
 
+  if (isBlockHost) return { display: 'block' };
   if (!isTextLike) return { display: 'block' };
 
-  return {
-    display: 'flex',
-    'align-items': style.textAlign === 'center' ? 'center' : 'flex-start',
-    'justify-content':
-      style.textAlign === 'center' ? 'center' : style.textAlign === 'right' ? 'flex-end' : 'flex-start',
+  const verticalAlignMap: Record<string, string> = {
+    top: 'flex-start',
+    center: 'center',
+    bottom: 'flex-end',
   };
+
+  const layout: Record<string, string> = {
+    display: 'flex',
+  };
+
+  // 与编辑器 UIElementView 一致：未手动设对齐时，用 verticalAlign / textAlign
+  if (!style.alignItems) {
+    layout['align-items'] =
+      verticalAlignMap[style.verticalAlign || 'center'] || 'center';
+  }
+  if (!style.justifyContent) {
+    layout['justify-content'] =
+      style.textAlign === 'center'
+        ? 'center'
+        : style.textAlign === 'right'
+          ? 'flex-end'
+          : 'flex-start';
+  }
+
+  return layout;
 }
 
 function buildElementStyle(el: UIElement, ctx: StyleContext): string {
-  const { parentWidth, parentHeight } = ctx;
+  const { parentWidth, parentHeight, sizeUnit } = ctx;
+  // px 模式：位置/尺寸用绝对像素，与画布编辑器一致，避免百分比换算导致间距漂移
+  const box =
+    sizeUnit === 'px'
+      ? {
+          left: `${el.x}px`,
+          top: `${el.y}px`,
+          width: `${el.width}px`,
+          height: `${el.height}px`,
+        }
+      : {
+          left: toPercent(el.x, parentWidth),
+          top: toPercent(el.y, parentHeight),
+          width: toPercent(el.width, parentWidth),
+          height: toPercent(el.height, parentHeight),
+        };
+
   return styleToCss(el.style, ctx, {
     position: 'absolute',
-    left: toPercent(el.x, parentWidth),
-    top: toPercent(el.y, parentHeight),
-    width: toPercent(el.width, parentWidth),
-    height: toPercent(el.height, parentHeight),
+    ...box,
     'box-sizing': 'border-box',
     'z-index': el.zIndex,
     ...getFlexLayout(el),
@@ -152,8 +208,9 @@ function buildElementStyle(el: UIElement, ctx: StyleContext): string {
 }
 
 function buildInputInnerStyle(el: UIElement, ctx: StyleContext): string {
-  const { canvasWidth } = ctx;
+  const { canvasWidth, sizeUnit } = ctx;
   const { style } = el;
+  const len = (px: number) => toLength(px, canvasWidth, sizeUnit);
   const rules = [
     'width: 100%',
     'height: 100%',
@@ -162,10 +219,10 @@ function buildInputInnerStyle(el: UIElement, ctx: StyleContext): string {
     'background: transparent',
     'box-sizing: border-box',
     style.color ? `color: ${escapeStyleValue(style.color)}` : '',
-    style.fontSize !== undefined ? `font-size: ${toVw(style.fontSize, canvasWidth)}` : '',
+    style.fontSize !== undefined ? `font-size: ${len(style.fontSize)}` : '',
     style.fontWeight !== undefined ? `font-weight: ${style.fontWeight}` : '',
     style.fontFamily && style.fontFamily !== 'inherit' ? `font-family: ${escapeStyleValue(style.fontFamily)}` : '',
-    style.padding !== undefined ? `padding: ${toVw(style.padding, canvasWidth)}` : '',
+    style.padding !== undefined ? `padding: ${len(style.padding)}` : '',
   ].filter(Boolean);
   return rules.join('; ');
 }
@@ -215,7 +272,7 @@ export function buildUIExportBundle(
   canvasHeight: number,
   canvasBackground: string,
   ctx?: UIExportContext,
-  options?: { includeHidden?: boolean }
+  options?: { includeHidden?: boolean; sizeUnit?: UIExportSizeUnit }
 ): UIExportBundle {
   const prepared = elements.map((el) => resolveElementAssets(el, ctx));
   const elementMap = new Map(prepared.map((el) => [el.id, el]));
@@ -223,6 +280,7 @@ export function buildUIExportBundle(
   const hoverRules: string[] = [];
   const chartInits: { domId: string; option: Record<string, unknown> }[] = [];
   const includeHidden = options?.includeHidden === true;
+  const sizeUnit: UIExportSizeUnit = options?.sizeUnit ?? 'vw';
 
   function getChildren(parentId: string | null): UIElement[] {
     return prepared
@@ -249,6 +307,7 @@ export function buildUIExportBundle(
       parentHeight: parentSize.height,
       canvasWidth,
       canvasHeight,
+      sizeUnit,
     };
 
     const childHtml = getChildren(el.id).map(renderNode).join('\n');

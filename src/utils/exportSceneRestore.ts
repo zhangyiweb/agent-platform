@@ -8,12 +8,16 @@ import {
 
 export type { ExportedTextureUvState };
 
-/** 导出前：确保 GLB 节点携带业务 id（clone 后仍保留） */
+/** 导出前：确保 GLB 节点携带业务 id（clone 会复制 userData；此处补齐缺失项） */
 export function stampModelUserDataForExport(exportScene: THREE.Scene) {
   const { objects, getThreeObject } = useSceneStore.getState();
 
+  // 按名称补齐顶层缺失 id（clone 后 uuid 会变，不能靠 uuid 对齐）
   exportScene.children.forEach((child) => {
-    if (child.userData?.id) return;
+    if (child.userData?.id) {
+      child.userData.businessId = child.userData.id;
+      return;
+    }
     const matched = objects.find((obj) => {
       const source = getThreeObject(obj.id);
       return source?.name && source.name === child.name;

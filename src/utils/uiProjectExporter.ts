@@ -9,6 +9,7 @@ import {
   parseDataUrl,
   type UIExportBundle,
 } from '@/utils/uiExportCore';
+import { ZIP_GENERATE_OPTIONS } from '@/utils/zipExport';
 
 export type UIExportFormat = 'html' | 'vue' | 'react';
 
@@ -286,7 +287,7 @@ export async function exportUIProjectPackage(
     root.file('README.md', buildReactReadme(pageMeta, exportTime));
   }
 
-  const blob = await zip.generateAsync({ type: 'blob' });
+  const blob = await zip.generateAsync(ZIP_GENERATE_OPTIONS);
   const filename = `${folderName}.zip`;
   downloadBlob(blob, filename);
 

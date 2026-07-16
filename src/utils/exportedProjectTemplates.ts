@@ -227,7 +227,12 @@ body:not(.app-booting) #ui-overlay {
 `;
 }
 
-export function buildMainJs(hasCameraTour = false): string {
+export function buildMainJs(options: boolean | { hasCameraTour?: boolean; hasLabels?: boolean } = false): string {
+  const opts =
+    typeof options === 'boolean'
+      ? { hasCameraTour: options, hasLabels: false }
+      : { hasCameraTour: Boolean(options.hasCameraTour), hasLabels: Boolean(options.hasLabels) };
+  const { hasCameraTour, hasLabels } = opts;
   const restoreScript = buildObjectIdRestoreScript();
   const normalizeScript = buildTextureUvNormalizeScript();
   const defaultCamera = JSON.stringify(EXPORT_PACKAGE_DEFAULT_CAMERA_POSITION);
@@ -238,7 +243,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { createPostProcessPipeline, normalizePostProcessConfig } from './postProcess.js';
 import { createParticleEmitters, tickParticleEmitters } from './particleRuntime.js';
-${hasCameraTour ? "import { createCameraTourController } from './cameraTour.js';\n" : ''}
+${hasLabels ? "import { createLabelSystems } from './labelRuntime.js';\n" : ''}${hasCameraTour ? "import { createCameraTourController } from './cameraTour.js';\n" : ''}
 
 const canvas = document.getElementById('canvas');
 const loadingEl = document.getElementById('loading');
@@ -510,6 +515,13 @@ async function bootstrap() {
     config.editor?.objects || [],
     config.editor?.particles || {}
   );
+  ${hasLabels ? `const labelSystems = createLabelSystems(
+    scene,
+    camera,
+    document.body,
+    config.editor?.objects || [],
+    config.editor?.labelPages || {}
+  );` : 'const labelSystems = null;'}
   const timer = new THREE.Timer();
   timer.connect(document);
 
@@ -558,6 +570,7 @@ async function bootstrap() {
     } else {
       renderer.render(scene, camera);
     }
+    labelSystems?.render(scene, camera);
   }
   animate();
 
@@ -566,11 +579,12 @@ async function bootstrap() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     postPipeline?.setSize(window.innerWidth, window.innerHeight);
+    labelSystems?.setSize(window.innerWidth, window.innerHeight);
   });
 
-  hideLoading();
-
   ${buildExportedSceneApiScript(hasCameraTour)}
+
+  hideLoading();
 }
 
 bootstrap().catch((err) => {
@@ -597,6 +611,7 @@ export function buildReadme(exportTime: string): string {
 │   ├── ui-bridge.js    # UI 事件 → sceneApi（如有合并 UI）
 │   ├── dataBridge.js   # 后台数据接入预留（读 config/runtime.json）
 │   ├── particleRuntime.js # 粒子特效运行时
+│   ├── labelRuntime.js # 场景 HTML 标签（CSS2D/CSS3D）
 │   ├── postProcess.js  # 全屏后期处理
 │   └── cameraTour.js   # 相机漫游工具包
 ├── config/
@@ -612,6 +627,7 @@ export function buildReadme(exportTime: string): string {
 │   ├── models/scene.glb
 │   ├── textures/
 │   ├── ui/             # UI 图片资源（如有）
+│   ├── labels/         # 标签内嵌 UI 图片（如有）
 │   └── hdr/
 └── README.md
 \`\`\`
@@ -654,6 +670,7 @@ python -m http.server 8080
   - 切换路线：\`await window.cameraTour.loadConfig('./config/camera-tours/路线id.json')\`
 - **后期处理**：\`config/scene.json\` 的 \`postProcess\` 节保存编辑器后期参数，\`js/postProcess.js\` 与 \`main.js\` 已自动接入 EffectComposer。
 - **粒子特效**：\`editor.particles\` 保存各发射器参数（预设、发射形状、颜色、贴图等）；\`editor.objects\` 中 \`type: "particle"\` 的对象记录位置与显隐。\`js/particleRuntime.js\` 基于 three.quarks 自动创建并播放，与编辑器预览一致。自定义贴图会写入 \`assets/textures/particles/\`。
+- **场景标签**：\`editor.objects\` 中 \`type: "label"\` 记录 CSS2D / CSS3D / CSS3DSprite 标签；\`editor.labelPages\` 为标签引用的 UI 页预渲染 HTML。\`js/labelRuntime.js\` 自动挂载并渲染，交互走 \`window.sceneApi\`。
 
 ## 依赖
 

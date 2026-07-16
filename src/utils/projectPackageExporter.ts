@@ -18,10 +18,16 @@ import {
 import { buildCameraTourJs } from '@/utils/exportedCameraTourTemplate';
 import { buildPostProcessJs } from '@/utils/exportedPostProcessTemplate';
 import { buildParticleRuntimeJs } from '@/utils/exportedParticleRuntime';
+import { buildLabelRuntimeJs } from '@/utils/exportedLabelRuntime';
+import {
+  buildLabelPagePacks,
+  countSceneLabels,
+} from '@/utils/exportLabelAssets';
 import {
   countParticleEmitters,
   packParticleTexturesForExport,
 } from '@/utils/exportParticleAssets';
+import { ZIP_GENERATE_OPTIONS } from '@/utils/zipExport';
 import {
   buildCameraTourGuideMarkdown,
   buildCameraTourIndexJson,
@@ -39,6 +45,7 @@ import {
   getTextureZipFiles,
   inlineDownloadedTextures,
   packTextureAssetsForZip,
+  prepareTexturesForGlbExport,
   type ExportedTextureAssetEntry,
   type PolyhavenModelSource,
 } from '@/utils/exportExternalAssets';
@@ -76,6 +83,8 @@ export interface ProjectPackageExportResult {
   cameraTourMode?: 'stop' | 'spline';
   hasParticles: boolean;
   particleCount: number;
+  hasLabels: boolean;
+  labelCount: number;
   hasUIOverlay: boolean;
   uiBindingCount: number;
 }
@@ -89,6 +98,7 @@ async function exportGlbBuffer(
   normalizeObjectTextureUvs(exportScene);
   stampModelUserDataForExport(exportScene);
   await inlineDownloadedTextures(exportScene, downloadedTextures);
+  await prepareTexturesForGlbExport(exportScene);
 
   return new Promise((resolve, reject) => {
     const exporter = new GLTFExporter();
@@ -102,7 +112,7 @@ async function exportGlbBuffer(
         reject(new Error('GLB 导出失败：未生成二进制数据'));
       },
       (error) => reject(error instanceof Error ? error : new Error(String(error))),
-      { binary: true, trs: true, onlyVisible: true, embedImages: true }
+      { binary: true, trs: true, onlyVisible: false, embedImages: true }
     );
   });
 }
@@ -290,23 +300,7 @@ export async function exportProjectPackage(
   }
 
   // 将当前 UI 编辑态写回 pages，保证导出拿到最新 actions
-  useUIEditorStore.setState((state) => {
-    const page = state.pages.find((p) => p.id === state.activePageId);
-    if (!page) return state;
-    return {
-      pages: state.pages.map((p) =>
-        p.id === state.activePageId
-          ? {
-              ...p,
-              elements: state.elements,
-              canvasWidth: state.canvasWidth,
-              canvasHeight: state.canvasHeight,
-              canvasBackground: state.canvasBackground,
-            }
-          : p
-      ),
-    };
-  });
+  useUIEditorStore.getState().flushActivePage();
 
   const baseConfig = generateSceneConfig();
   const rawParticles = baseConfig.editor.particles ?? {};
@@ -314,6 +308,15 @@ export async function exportProjectPackage(
     await packParticleTexturesForExport(rawParticles);
   const particleCount = countParticleEmitters(baseConfig.editor.objects, packedParticles);
   const hasParticles = particleCount > 0;
+  const labelCount = countSceneLabels(baseConfig.editor.objects);
+  const hasLabels = labelCount > 0;
+
+  const { packs: labelPages, files: labelAssetFiles } = buildLabelPagePacks(
+    baseConfig.editor.objects
+  );
+  labelAssetFiles.forEach(({ path, data }) => {
+    root.file(path, data);
+  });
 
   particleTextureFiles.forEach(({ path, data }) => {
     root.file(path, data);
@@ -376,6 +379,8 @@ export async function exportProjectPackage(
         editor: {
           ...baseConfig.editor,
           ...(hasParticles ? { particles: packedParticles } : {}),
+          ...(Object.keys(labelPages).length > 0 ? { labelPages } : {}),
+          previewPageId: useUIEditorStore.getState().previewPageId,
         },
       },
       assets,
@@ -392,12 +397,12 @@ export async function exportProjectPackage(
 
   // —— 合并 UI 叠层（使用「预览画布」所选页面，默认第一页）——
   const uiState = useUIEditorStore.getState();
-  const snap = uiState.getPagesSnapshot();
-  const activePage =
-    snap.find((p) => p.id === uiState.previewPageId) ??
-    snap.find((p) => p.id === uiState.activePageId) ??
-    snap[0] ??
+  const previewPage =
+    uiState.getPageSnapshot(uiState.previewPageId) ??
+    uiState.getPageSnapshot(uiState.activePageId) ??
+    uiState.pages[0] ??
     null;
+  const activePage = previewPage;
   const uiElements = activePage?.elements?.length ? activePage.elements : uiState.elements;
   const shouldMergeUI =
     options.mergeUI !== false && Array.isArray(uiElements) && uiElements.length > 0;
@@ -486,13 +491,19 @@ export async function exportProjectPackage(
     })
   );
   root.file('css/style.css', buildStyleCss());
-  root.file('js/main.js', buildMainJs(Boolean(exportTour)));
+  root.file(
+    'js/main.js',
+    buildMainJs({ hasCameraTour: Boolean(exportTour), hasLabels })
+  );
   root.file('js/cameraTour.js', buildCameraTourJs());
   root.file('js/postProcess.js', buildPostProcessJs());
   root.file('js/particleRuntime.js', buildParticleRuntimeJs());
+  if (hasLabels) {
+    root.file('js/labelRuntime.js', buildLabelRuntimeJs());
+  }
   root.file('README.md', buildReadme(baseConfig.exportTime));
 
-  const blob = await zip.generateAsync({ type: 'blob' });
+  const blob = await zip.generateAsync(ZIP_GENERATE_OPTIONS);
   const filename = `${folderName}.zip`;
   downloadBlob(blob, filename);
 
@@ -509,6 +520,8 @@ export async function exportProjectPackage(
     cameraTourMode: exportTour?.mode,
     hasParticles,
     particleCount,
+    hasLabels,
+    labelCount,
     hasUIOverlay,
     uiBindingCount,
   };

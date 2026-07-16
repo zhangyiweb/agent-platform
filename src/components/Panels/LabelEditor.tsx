@@ -4,7 +4,6 @@ import type { Color } from 'antd/es/color-picker';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useSceneStore } from '@/store/sceneStore';
 import { useUIEditorStore } from '@/store/uiEditorStore';
-import { useEditorStore } from '@/store/editorStore';
 import type { SceneLabelConfig, SceneLabelContentMode } from '@/types/sceneLabel';
 import {
   SCENE_LABEL_MODE_OPTIONS,
@@ -27,18 +26,16 @@ export function LabelEditor({ objectId }: LabelEditorProps) {
   const sceneObj = useSceneStore((s) => s.objects.find((o) => o.id === objectId));
   const updateObject = useSceneStore((s) => s.updateObject);
   const getThreeObject = useSceneStore((s) => s.getThreeObject);
-  const editorMode = useEditorStore((s) => s.editorMode);
 
-  const pageSig = useUIEditorStore((s) =>
-    s.pages.map((p) => `${p.id}:${p.name}:${p.canvasWidth}x${p.canvasHeight}`).join('|')
+  const pages = useUIEditorStore((s) => s.pages);
+  const pageOptions = useMemo(
+    () =>
+      pages.map((p) => ({
+        value: p.id,
+        label: `${p.name}（${p.canvasWidth}×${p.canvasHeight}）`,
+      })),
+    [pages]
   );
-
-  const pageOptions = useMemo(() => {
-    return useUIEditorStore.getState().getPagesSnapshot().map((p) => ({
-      value: p.id,
-      label: `${p.name}（${p.canvasWidth}×${p.canvasHeight}）`,
-    }));
-  }, [pageSig, editorMode]);
 
   const cfg: SceneLabelConfig = {
     ...createDefaultLabelConfig(sceneObj?.label?.mode ?? 'css2d'),
@@ -229,7 +226,7 @@ export function LabelEditor({ objectId }: LabelEditorProps) {
         <div>
           <label className="text-xs text-gray-400 block mb-1">绑定 UI 编排页面</label>
           <Select
-            key={`ui-pages-${pageSig}`}
+            key={`ui-pages-${pages.map((p) => p.id).join('-')}`}
             className="w-full"
             size="small"
             allowClear

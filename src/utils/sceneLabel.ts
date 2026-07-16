@@ -51,7 +51,7 @@ export function bindLabelUiInteractions(root: HTMLElement, pageId: string) {
     (prev as () => void)();
   }
 
-  const page = useUIEditorStore.getState().getPagesSnapshot().find((p) => p.id === pageId);
+  const page = useUIEditorStore.getState().getPageSnapshot(pageId);
   if (!page) {
     (root as unknown as Record<string, unknown>)[LABEL_UI_CLEANUP_KEY] = undefined;
     return;
@@ -97,7 +97,7 @@ export function buildLabelUiPageFragment(
   pageId: string,
   visualScale = 1
 ): { root: HTMLElement; designWidth: number; designHeight: number } | null {
-  const page = useUIEditorStore.getState().getPagesSnapshot().find((p) => p.id === pageId);
+  const page = useUIEditorStore.getState().getPageSnapshot(pageId);
   if (!page) return null;
 
   const bundle = buildUIExportBundle(
@@ -106,7 +106,7 @@ export function buildLabelUiPageFragment(
     page.canvasHeight,
     page.canvasBackground,
     undefined,
-    { includeHidden: true }
+    { includeHidden: true, sizeUnit: 'px' }
   );
 
   const designWidth = Math.max(1, page.canvasWidth);
@@ -129,10 +129,11 @@ export function buildLabelUiPageFragment(
   ].join(';');
 
   const style = document.createElement('style');
-  // 不注入全局 html/body/.ui-page(100vw) 规则，避免污染编辑器并裁切画布
+  // 字号等用 px（与编辑器一致）；勿用 vw，否则相对浏览器窗口会放大并挤成竖排
   style.textContent = `
 .scene-label-ui-root {
   pointer-events: none;
+  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
 }
 .scene-label-ui-canvas {
   position: absolute;
@@ -151,9 +152,20 @@ export function buildLabelUiPageFragment(
   box-sizing: border-box;
 }
 .scene-label-ui-canvas .ui-el-text {
-  display: inline-block;
-  max-width: 100%;
-  word-break: break-word;
+  width: 100%;
+  display: block;
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+.scene-label-ui-canvas button.ui-el {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+.scene-label-ui-canvas button.ui-el .ui-el-text {
+  pointer-events: none;
 }
 /* 仅联动预览开启交互时由 .is-preview-interactive 打开点击 */
 .editor-css-overlay.is-preview-interactive .scene-label-ui-root .ui-interactive,
@@ -418,19 +430,33 @@ export function hitTestLabelAtClientPoint(clientX: number, clientY: number): str
     if (!anchor || !anchor.visible) continue;
 
     let cssEl: HTMLElement | null = null;
-    anchor.traverse((child) => {
-      if (cssEl) return;
+    for (const child of anchor.children) {
       if (child.userData?.isLabelCssObject || child.name === 'label_css_object') {
         const el =
           (child as CSS2DObject).element ||
           (child as CSS3DObject).element ||
           null;
-        if (el) cssEl = el;
+        if (el) {
+          cssEl = el;
+          break;
+        }
       }
-    });
+    }
+    if (!cssEl) {
+      anchor.traverse((child) => {
+        if (cssEl) return;
+        if (child.userData?.isLabelCssObject || child.name === 'label_css_object') {
+          const el =
+            (child as CSS2DObject).element ||
+            (child as CSS3DObject).element ||
+            null;
+          if (el) cssEl = el;
+        }
+      });
+    }
     if (!cssEl) continue;
 
-    const rect = cssEl.getBoundingClientRect();
+    const rect = (cssEl as HTMLElement).getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) continue;
     if (
       clientX >= rect.left &&
