@@ -22,19 +22,33 @@ import type { ReactNode } from 'react';
 export const PANEL_SELECT_CLASS = 'panel-select';
 export const panelSelectClassNames = { popup: { root: 'panel-select-popup' } };
 
-export function PanelSelect(props: SelectProps) {
+export function PanelSelect({ className, classNames, ...props }: SelectProps) {
   return (
     <Select
       size="small"
-      className={`${PANEL_SELECT_CLASS} w-full`}
-      classNames={panelSelectClassNames}
+      className={[PANEL_SELECT_CLASS, 'w-full', className].filter(Boolean).join(' ')}
+      classNames={{
+        ...panelSelectClassNames,
+        ...classNames,
+        popup: {
+          ...panelSelectClassNames.popup,
+          ...classNames?.popup,
+        },
+      }}
       {...props}
     />
   );
 }
 
-export function PanelInputNumber(props: InputNumberProps) {
-  return <InputNumber size="small" className="!w-full" controls={false} {...props} />;
+export function PanelInputNumber({ className, ...props }: InputNumberProps) {
+  return (
+    <InputNumber
+      size="small"
+      className={['!w-full', className].filter(Boolean).join(' ')}
+      controls={false}
+      {...props}
+    />
+  );
 }
 
 export function PanelInput(props: InputProps) {

@@ -851,7 +851,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
           value={selectedType}
           onChange={(value) => handleTypeChange(value as string)}
           options={materialTypes.map((type) => ({ label: type, value: type }))}
-          className="w-full px-2 py-1.5 text-xs bg-gray-700 text-white border border-gray-600 rounded focus:outline-none focus:border-blue-500"
         />
         {selectedType.includes('Node') && (
           <p className="text-xs text-yellow-500 mt-1">⚠️ NodeMaterial需要WebGPU支持,已降级到普通材质</p>
@@ -1099,7 +1098,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                 min={0.01}
                 value={uvRepeatX}
                 onChange={(value) => handleUvChange('repeatX', typeof value === 'number' ? value : 1)}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
             <div>
@@ -1109,7 +1107,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                 min={0.01}
                 value={uvRepeatY}
                 onChange={(value) => handleUvChange('repeatY', typeof value === 'number' ? value : 1)}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
             <div>
@@ -1118,7 +1115,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                 step={0.01}
                 value={uvOffsetX}
                 onChange={(value) => handleUvChange('offsetX', typeof value === 'number' ? value : 0)}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
             <div>
@@ -1127,7 +1123,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                 step={0.01}
                 value={uvOffsetY}
                 onChange={(value) => handleUvChange('offsetY', typeof value === 'number' ? value : 0)}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
           </div>
@@ -1151,7 +1146,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                   { label: '拉伸', value: THREE.ClampToEdgeWrapping },
                   { label: '镜像', value: THREE.MirroredRepeatWrapping },
                 ]}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
             <div>
@@ -1164,7 +1158,6 @@ export function MaterialEditor({ material, object3D, onMaterialChange }: Materia
                   { label: '拉伸', value: THREE.ClampToEdgeWrapping },
                   { label: '镜像', value: THREE.MirroredRepeatWrapping },
                 ]}
-                className="w-full px-2 py-1 text-xs bg-gray-700 text-white border border-gray-600 rounded"
               />
             </div>
           </div>
