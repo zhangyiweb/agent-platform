@@ -1,0 +1,23 @@
+# graphify output
+graphify-out/
+
+# Vite / docs static build (minified bundles dominate the graph)
+docs/assets/
+docs/favicon.svg
+docs/icons.svg
+public/favicon.svg
+public/icons.svg
+
+# Scaffold / vendor logos (not project knowledge)
+src/assets/react.svg
+src/assets/vite.svg
+
+# Lockfiles & local tooling noise
+package-lock.json
+*.wasm
+
+# Already covered by .gitignore, listed for clarity when using --no-gitignore
+node_modules/
+dist/
+build/
+coverage/

@@ -19,8 +19,22 @@ import {
 /** 联动预览中的 UI 显隐（不写回编辑器 store） */
 const previewUIVisibility = new Map<string, boolean>();
 
+/** 联动预览中改过显隐的场景对象（退出时按编辑器 store 还原） */
+const previewObjectVisibility = new Set<string>();
+
+/** 清除联动预览运行时态：还原 3D 对象显隐，并丢掉预览期 UI 显隐覆盖 */
 export function clearPreviewUIVisibility() {
   previewUIVisibility.clear();
+  if (previewObjectVisibility.size > 0) {
+    const { objects, getThreeObject } = useSceneStore.getState();
+    const visibleById = new Map(objects.map((obj) => [obj.id, obj.visible !== false]));
+    previewObjectVisibility.forEach((id) => {
+      const three = getThreeObject(id);
+      if (!three) return;
+      three.visible = visibleById.get(id) ?? true;
+    });
+    previewObjectVisibility.clear();
+  }
 }
 
 declare global {
@@ -336,7 +350,13 @@ function createEditorSceneApi(): EditorSceneApi {
       }
       const next = applyVisibilityMode(object.visible, normalizeVisibilityArg(mode));
       object.visible = next;
-      useSceneStore.getState().updateObject(objectId, { visible: next });
+      const isPreview = useEditorStore.getState().editorMode === 'preview';
+      if (isPreview) {
+        // 预览只改 Three 运行时显隐，不写回编辑器，避免切回场景编辑后模型仍被隐藏
+        previewObjectVisibility.add(objectId);
+      } else {
+        useSceneStore.getState().updateObject(objectId, { visible: next });
+      }
       return true;
     },
 
